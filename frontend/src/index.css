@@ -1,0 +1,624 @@
+@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@100..900&family=Inter:ital,wght@0,300;0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-fa: "Vazirmatn", "Inter", sans-serif;
+  --font-display: "Outfit", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-heading: "Space Grotesk", sans-serif;
+
+  --color-obsidian: var(--obsidian);
+  --color-graphite: var(--graphite);
+  --color-neural-cyan: var(--neural-cyan);
+  --color-electric-blue: var(--electric-blue);
+  --color-titanium: var(--titanium);
+}
+
+:root {
+  --obsidian: #050505;
+  --graphite: #111111;
+  --neural-cyan: #5df7ff;
+  --electric-blue: #4a8dff;
+  --titanium: #b9bcc2;
+}
+
+.light {
+  --obsidian: #f4f6fa;
+  --graphite: #ffffff;
+  --neural-cyan: #0284c7;
+  --electric-blue: #2563eb;
+  --titanium: #475569;
+}
+
+/* Custom global luxury scrollbars and utilities */
+@layer base {
+  body {
+    background-color: #050505;
+    color: #f8f8f8;
+    font-family: var(--font-sans);
+    overflow-x: hidden;
+  }
+
+  /* Smooth custom scrollbars */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: rgba(5, 5, 5, 0.5);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(185, 188, 194, 0.15);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(93, 247, 255, 0.3);
+  }
+}
+
+/* High-fidelity Frosted Glass effects based on design parameters */
+.liquid-glass {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 
+    0 8px 32px 0 rgba(0, 0, 0, 0.37),
+    inset 0 1px 1px rgba(255, 255, 255, 0.1),
+    inset 0 -1px 2px rgba(0, 0, 0, 0.4);
+}
+
+.liquid-glass-premium {
+  background: rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(32px) saturate(160%);
+  -webkit-backdrop-filter: blur(32px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 
+    0 20px 50px rgba(0, 0, 0, 0.5),
+    inset 0 1px 2px rgba(255, 255, 255, 0.15),
+    0 0 80px rgba(93, 247, 255, 0.03);
+}
+
+.glass-pill {
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.glass-pill:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(93, 247, 255, 0.3);
+  box-shadow: 0 0 15px rgba(93, 247, 255, 0.08);
+}
+
+/* Beautiful frosted container card as defined in design HTML */
+.frosted-card {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  border-radius: 1rem; /* 16px */
+  transition: border-color 0.3s ease, background 0.3s ease;
+}
+
+.frosted-card:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(93, 247, 255, 0.2);
+}
+
+/* Intelligent subtle breathing keyframe animations */
+@keyframes pulseGlow {
+  0%, 100% {
+    opacity: 0.25;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(1.08);
+  }
+}
+
+.ambient-glow {
+  filter: blur(100px);
+  animation: pulseGlow 10s infinite ease-in-out;
+}
+
+@keyframes orbStream {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.05);
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+  }
+}
+
+.animate-orb-stream {
+  animation: orbStream 20s infinite linear;
+}
+
+/* Custom text clip for luxurious title gradients */
+.text-luxury {
+  background: linear-gradient(135deg, #f8f8f8 20%, #b9bcc2 60%, rgba(185, 188, 194, 0.5) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.text-accent-gradient {
+  background: linear-gradient(135deg, #5df7ff 0%, #4a8dff 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Light Theme Overrides */
+.light {
+  background-color: #f4f6fa !important;
+  color: #0f172a !important;
+}
+
+.light body {
+  background-color: #f4f6fa !important;
+  color: #0f172a !important;
+}
+
+.light .text-luxury {
+  background: linear-gradient(135deg, #0f172a 20%, #334155 60%, #475569 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.light .text-accent-gradient {
+  background: linear-gradient(135deg, #0284c7 0%, #2563eb 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.light .text-white {
+  color: #0f172a !important;
+}
+
+.light .text-white\/90 {
+  color: #1e293b !important;
+}
+
+.light .text-white\/80 {
+  color: #334155 !important;
+}
+
+.light .text-white\/70 {
+  color: #334155 !important;
+}
+
+.light .text-white\/60 {
+  color: #475569 !important;
+}
+
+.light .text-white\/40 {
+  color: #64748b !important;
+}
+
+.light .text-titanium\/50 {
+  color: #475569 !important;
+}
+
+.light .text-titanium\/60 {
+  color: #334155 !important;
+}
+
+.light .text-titanium\/45 {
+  color: #475569 !important;
+}
+
+.light .text-titanium\/40 {
+  color: #64748b !important;
+}
+
+.light .text-titanium\/30 {
+  color: #94a3b8 !important;
+}
+
+.light .text-titanium\/70 {
+  color: #1e293b !important;
+}
+
+.light .text-titanium\/80 {
+  color: #0f172a !important;
+}
+
+.light .text-titanium\/90 {
+  color: #0f172a !important;
+}
+
+.light .border-white\/10 {
+  border-color: rgba(15, 23, 42, 0.12) !important;
+}
+
+.light .border-white\/5 {
+  border-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+.light .bg-white\/5 {
+  background-color: rgba(15, 23, 42, 0.04) !important;
+}
+
+.light .bg-white\/3 {
+  background-color: rgba(15, 23, 42, 0.02) !important;
+}
+
+.light .bg-white\/10 {
+  background-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+.light .bg-white\/\[0\.02\] {
+  background-color: rgba(15, 23, 42, 0.02) !important;
+}
+
+.light .bg-white\/\[0\.03\] {
+  background-color: rgba(15, 23, 42, 0.03) !important;
+}
+
+.light .bg-white\/\[0\.01\] {
+  background-color: rgba(15, 23, 42, 0.01) !important;
+}
+
+.light .bg-white\/\[0\.04\] {
+  background-color: rgba(15, 23, 42, 0.04) !important;
+}
+
+.light .bg-white\/\[0\.05\] {
+  background-color: rgba(15, 23, 42, 0.05) !important;
+}
+
+.light .bg-black\/45 {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+  border-color: rgba(15, 23, 42, 0.15) !important;
+}
+
+.light .bg-black\/40 {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+  border-color: rgba(15, 23, 42, 0.12) !important;
+}
+
+.light .bg-black\/35 {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+  border-color: rgba(15, 23, 42, 0.1) !important;
+}
+
+.light .bg-black\/25 {
+  background-color: rgba(255, 255, 255, 0.75) !important;
+  border-color: rgba(15, 23, 42, 0.1) !important;
+}
+
+.light .bg-[#0b0c10]/40 {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+  border-color: rgba(15, 23, 42, 0.1) !important;
+}
+
+.light .bg-black\/20 {
+  background-color: rgba(15, 23, 42, 0.03) !important;
+}
+
+.light .bg-black\/30 {
+  background-color: rgba(15, 23, 42, 0.02) !important;
+}
+
+.light .bg-[#111111]/70 {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+.light .bg-[#111111]/60 {
+  background-color: rgba(15, 23, 42, 0.02) !important;
+}
+
+.light .bg-[#161616] {
+  background-color: #ffffff !important;
+}
+
+.light .bg-[#1e1e1e] {
+  background-color: #e2e8f0 !important;
+}
+
+.light .bg-[#161616]/75 {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+}
+
+.light .bg-[#1a1c23] {
+  background-color: #f8fafc !important;
+}
+
+.light .bg-[#0a0b0d] {
+  background-color: #f1f5f9 !important;
+}
+
+.light .bg-[#12131a] {
+  background-color: #ffffff !important;
+}
+
+.light .bg-[#050505] {
+  background-color: #f1f3f7 !important;
+}
+
+.light nav {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+.light header {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+.light .liquid-glass {
+  background: rgba(255, 255, 255, 0.75) !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.05) !important;
+}
+
+.light .liquid-glass-premium {
+  background: rgba(255, 255, 255, 0.85) !important;
+  border-color: rgba(15, 23, 42, 0.1) !important;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06) !important;
+}
+
+.light .frosted-card {
+  background: rgba(255, 255, 255, 0.75) !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.04) !important;
+}
+
+.light .frosted-card:hover {
+  background: rgba(255, 255, 255, 0.85) !important;
+  border-color: rgba(15, 23, 42, 0.15) !important;
+}
+
+.light .glass-pill {
+  background: rgba(15, 23, 42, 0.03) !important;
+  border-color: rgba(15, 23, 42, 0.06) !important;
+}
+
+.light .glass-pill:hover {
+  background: rgba(15, 23, 42, 0.06) !important;
+  border-color: rgba(2, 132, 199, 0.3) !important;
+}
+
+.light .scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.12) !important;
+}
+
+.light ::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.02) !important;
+}
+
+.light .shadow-inner {
+  box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.03) !important;
+}
+
+.light .shadow-xl {
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.05), 0 10px 10px -5px rgba(0, 0, 0, 0.02) !important;
+}
+
+.light .shadow-2xl {
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.08) !important;
+}
+
+/* Additional comprehensive overrides to fix ALL residual dark mode items & contrast */
+.light input,
+.light textarea,
+.light select {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: rgba(15, 23, 42, 0.15) !important;
+}
+
+.light select option {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+.light input::placeholder,
+.light textarea::placeholder {
+  color: rgba(15, 23, 42, 0.4) !important;
+}
+
+/* Hardcoded dark backgrounds */
+.light .bg-\[\#111111\]\/80,
+.light .bg-\[\#121212\]\/80,
+.light .bg-\[\#161616\]\/85,
+.light .bg-\[\#0F0F0F\]\/65,
+.light .bg-\[\#111111\]\/60,
+.light .bg-\[\#111111\]\/45,
+.light .bg-\[\#161616\]\/75,
+.light .bg-\[\#050505\]\/60,
+.light .bg-\[\#050505\]\/40,
+.light .bg-\[\#111111\]\/70,
+.light .bg-\[\#111111\]\/60,
+.light .bg-\[\#121212\]\/80,
+.light .bg-\[\#161616\]\/85,
+.light .bg-\[\#111\] {
+  background-color: #ffffff !important;
+  border-color: rgba(15, 23, 42, 0.12) !important;
+  color: #0f172a !important;
+}
+
+/* Chat bubble with cyan-tinted backgrounds from dark mode */
+.light .bg-\[\#5DF7FF\]\/5 {
+  background-color: rgba(2, 132, 199, 0.08) !important;
+  border-color: rgba(2, 132, 199, 0.2) !important;
+}
+
+/* Make sure text colors inside chat/systems resolve beautifully */
+.light .text-\[\#E2F9FF\] {
+  color: #0f172a !important;
+}
+
+.light .text-white {
+  color: #0f172a !important;
+}
+
+.light .text-white\/95 {
+  color: #0f172a !important;
+}
+
+.light .text-white\/90 {
+  color: #0f172a !important;
+}
+
+.light .text-white\/85 {
+  color: #1e293b !important;
+}
+
+.light .text-white\/80 {
+  color: #1e293b !important;
+}
+
+.light .text-white\/70 {
+  color: #334155 !important;
+}
+
+.light .text-white\/60 {
+  color: #334155 !important;
+}
+
+.light .text-white\/50 {
+  color: #475569 !important;
+}
+
+.light .text-white\/40 {
+  color: #475569 !important;
+}
+
+.light .text-white\/30 {
+  color: #64748b !important;
+}
+
+/* Border overrides */
+.light .border-white\/10 {
+  border-color: rgba(15, 23, 42, 0.12) !important;
+}
+
+.light .border-white\/5 {
+  border-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+.light .border-white\/3 {
+  border-color: rgba(15, 23, 42, 0.06) !important;
+}
+
+.light .border-white\/20 {
+  border-color: rgba(15, 23, 42, 0.18) !important;
+}
+
+.light .border-white\/15 {
+  border-color: rgba(15, 23, 42, 0.14) !important;
+}
+
+/* Cyan & brand highlights */
+.light .text-neural-cyan,
+.light .text-\[\#5DF7FF\],
+.light .text-\[\#4A8DFF\],
+.light .text-cyan-400,
+.light .text-cyan-300,
+.light .text-blue-400,
+.light .text-blue-300,
+.light .text-teal-400,
+.light .text-\[\#a5f3fc\] {
+  color: #0369a1 !important;
+}
+
+.light .bg-neural-cyan\/10,
+.light .bg-\[\#5DF7FF\]\/10,
+.light .bg-\[\#4A8DFF\]\/10 {
+  background-color: rgba(3, 105, 161, 0.08) !important;
+  color: #0369a1 !important;
+}
+
+.light .bg-neural-cyan\/15,
+.light .bg-\[\#5DF7FF\]\/15,
+.light .bg-\[\#4A8DFF\]\/15 {
+  background-color: rgba(3, 105, 161, 0.12) !important;
+  color: #0369a1 !important;
+}
+
+.light .border-neural-cyan\/10,
+.light .border-neural-cyan\/15,
+.light .border-neural-cyan\/20,
+.light .border-neural-cyan\/30 {
+  border-color: rgba(3, 105, 161, 0.2) !important;
+}
+
+/* Buttons and primary cyan UI elements */
+.light .bg-neural-cyan {
+  background-color: #0369a1 !important;
+  color: #ffffff !important;
+}
+
+.light .bg-neural-cyan:hover {
+  background-color: #075985 !important;
+}
+
+/* Ensure the floating neural sphere/orb works perfectly in light mode */
+.light .orb-glow-layer {
+  filter: drop-shadow(0 0 25px rgba(3, 105, 161, 0.3)) !important;
+}
+
+/* Custom floating status chip targeting for extreme legibility */
+.floating-status-chip {
+  background-color: rgba(9, 9, 11, 0.9) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: #ffffff !important;
+}
+
+.light .floating-status-chip {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+  border-color: rgba(3, 105, 161, 0.25) !important;
+  color: #0369a1 !important;
+  box-shadow: 0 4px 15px rgba(3, 105, 161, 0.12) !important;
+}
+
+/* Advanced Workspace/Editor/Terminal Overrides to prevent dark blocks and unreadable green text */
+.light .bg-black\/15,
+.light .bg-black\/10,
+.light .bg-black\/20 {
+  background-color: #f8fafc !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+.light .bg-black\/85 {
+  background-color: #ffffff !important;
+  border-color: rgba(15, 23, 42, 0.12) !important;
+  color: #0f172a !important;
+}
+
+.light .bg-black\/30 {
+  background-color: #f1f5f9 !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+.light .bg-black\/60 {
+  background-color: rgba(15, 23, 42, 0.05) !important;
+  border-color: rgba(15, 23, 42, 0.1) !important;
+}
+
+/* Ensure code outputs and terminals are beautifully visible (Deep forest green and charcoal instead of unreadable neon green) */
+.light .text-emerald-400,
+.light .text-emerald-400\/90,
+.light .text-emerald-500 {
+  color: #115e59 !important; /* Rich, professional dark forest teal-green */
+}
+
+/* Glow effects matching light background */
+.light .absolute[class*="bg-[#4A8DFF]"] {
+  background-color: rgba(37, 99, 235, 0.08) !important;
+}
+.light .absolute[class*="bg-[#5DF7FF]"] {
+  background-color: rgba(2, 132, 199, 0.08) !important;
+}
+
+

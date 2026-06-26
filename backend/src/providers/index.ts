@@ -1,5 +1,6 @@
 import type { AIProvider } from './AIProvider';
 import { MockProvider } from './MockProvider';
+import { MiMoProvider } from './MiMoProvider';
 import { env } from '../config/env';
 import { logger } from '../config/logger';
 
@@ -12,6 +13,7 @@ import { logger } from '../config/logger';
  */
 const providers: Record<string, () => AIProvider> = {
   mock: () => new MockProvider(),
+  mimo: () => new MiMoProvider(),
 };
 
 let cachedProvider: AIProvider | null = null;

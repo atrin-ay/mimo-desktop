@@ -25,6 +25,9 @@ export interface EnvConfig {
   databasePath: string;
   aiProvider: string;
   mockProviderDelayMs: number;
+  mimoApiKey: string;
+  mimoBaseUrl: string;
+  mimoModel: string;
 }
 
 function loadEnv(): EnvConfig {
@@ -38,6 +41,9 @@ function loadEnv(): EnvConfig {
     process.env.MOCK_PROVIDER_DELAY_MS ?? '300',
     10,
   );
+  const mimoApiKey = process.env.MIMO_API_KEY ?? '';
+  const mimoBaseUrl = process.env.MIMO_BASE_URL ?? 'https://api.xiaomi.com/v1';
+  const mimoModel = process.env.MIMO_MODEL ?? 'MiMo-7B-RL';
 
   return {
     port,
@@ -47,6 +53,9 @@ function loadEnv(): EnvConfig {
     databasePath,
     aiProvider,
     mockProviderDelayMs,
+    mimoApiKey,
+    mimoBaseUrl,
+    mimoModel,
   };
 }
 

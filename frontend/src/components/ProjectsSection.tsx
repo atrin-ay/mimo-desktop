@@ -532,7 +532,7 @@ export default function ProjectsSection({
                         return (
                           <div 
                             key={msg.id}
-                            className={`flex gap-3 max-w-[85%] ${isUser ? "ml-auto flex-row-reverse text-right" : "text-left"}`}
+                            className={`flex gap-3 ${isUser ? "ml-auto flex-row-reverse text-right w-fit max-w-[65%]" : "text-left w-full max-w-[80%]"}`}
                           >
                             {/* AI profile avatar is our animated/pulsing circle instead of standard Bot profile */}
                             {isUser ? (

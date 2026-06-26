@@ -4,11 +4,11 @@ import type {
   ProviderMessage,
   ProviderResult,
 } from '../types';
-import { env } from '../config/env';
+import { exec } from 'child_process';
 import { logger } from '../config/logger';
 
 /**
- * MiMo AI provider — calls Xiaomi's MiMo model via OpenAI-compatible API.
+ * MiMo AI provider — calls the locally installed `mimo` CLI.
  */
 export class MiMoProvider implements AIProvider {
   readonly name = 'mimo';
@@ -18,86 +18,89 @@ export class MiMoProvider implements AIProvider {
       throw new Error('MiMoProvider requires at least one message');
     }
 
-    const apiKey = env.mimoApiKey;
-    if (!apiKey) {
-      throw new Error('MIMO_API_KEY is not configured');
+    const lastUserMessage = [...messages]
+      .reverse()
+      .find((m) => m.role === 'user');
+
+    const prompt = lastUserMessage?.content ?? '';
+
+    if (!prompt) {
+      throw new Error('No user message found in conversation');
     }
-
-    const url = `${env.mimoBaseUrl}/chat/completions`;
-
-    const systemMessage: ProviderMessage = {
-      role: 'user',
-      content:
-        'You are MiMo, an intelligent AI assistant created by Xiaomi. You are helpful, concise, and provide accurate answers.',
-    };
-
-    const apiMessages = [systemMessage, ...messages].map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
 
     logger.debug(
-      { messageCount: messages.length, model: env.mimoModel },
-      'MiMoProvider sending request',
+      { messageCount: messages.length },
+      'MiMoProvider executing CLI',
     );
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: env.mimoModel,
-        messages: apiMessages,
-        temperature: 0.7,
-        max_tokens: 2048,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      logger.error(
-        { status: response.status, body: errorText },
-        'MiMoProvider API error',
-      );
-      throw new Error(`MiMo API error: ${response.status} ${errorText}`);
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const data: any = await response.json();
-    const content = data.choices?.[0]?.message?.content ?? '';
+    const content = await this.runCli(prompt);
 
     if (!content) {
-      throw new Error('MiMo API returned empty response');
+      throw new Error('MiMo CLI returned empty response');
     }
 
-    logger.info(
-      { model: env.mimoModel, tokens: data.usage?.total_tokens },
-      'MiMoProvider response received',
-    );
+    logger.info({ messageCount: messages.length }, 'MiMoProvider response received');
 
     return {
       content,
       metadata: {
         provider: this.name,
-        model: env.mimoModel,
         messageCount: messages.length,
-        usage: data.usage,
       },
     };
   }
 
   async healthCheck(): Promise<ProviderHealth> {
-    const hasKey = !!env.mimoApiKey;
-    return {
-      healthy: hasKey,
-      provider: this.name,
-      details: {
-        model: env.mimoModel,
-        baseUrl: env.mimoBaseUrl,
-        apiKeyConfigured: hasKey,
-      },
-    };
+    return new Promise((resolve) => {
+      exec('mimo --version', { timeout: 5000 }, (err, stdout) => {
+        resolve({
+          healthy: !err,
+          provider: this.name,
+          details: {
+            version: err ? undefined : stdout.trim(),
+          },
+        });
+      });
+    });
+  }
+
+  private runCli(prompt: string): Promise<string> {
+    const escaped = prompt.replace(/"/g, '\\"').replace(/\n/g, ' ');
+    const cmd = `echo "${escaped}" | mimo run --dangerously-skip-permissions --format json`;
+
+    return new Promise((resolve, reject) => {
+      exec(
+        cmd,
+        { timeout: 120_000, maxBuffer: 10 * 1024 * 1024 },
+        (err, stdout, stderr) => {
+          if (err) {
+            logger.error({ err, stderr }, 'MiMo CLI execution failed');
+            reject(new Error(`MiMo CLI error: ${err.message}`));
+            return;
+          }
+
+          const text = this.parseJsonOutput(stdout);
+          resolve(text);
+        },
+      );
+    });
+  }
+
+  private parseJsonOutput(stdout: string): string {
+    const lines = stdout.split('\n').filter(Boolean);
+    const textParts: string[] = [];
+
+    for (const line of lines) {
+      try {
+        const event = JSON.parse(line);
+        if (event.type === 'text' && event.part?.text) {
+          textParts.push(event.part.text);
+        }
+      } catch {
+        // non-JSON line, skip
+      }
+    }
+
+    return textParts.join('\n').trim();
   }
 }

@@ -1,6 +1,5 @@
 /**
  * MIMO Backend - Type Definitions
- * Phase 1: Core Chat + Sessions
  */
 
 /** Message author role. */

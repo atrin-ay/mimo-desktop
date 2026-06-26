@@ -1,5 +1,4 @@
 import type { AIProvider } from './AIProvider';
-import { MockProvider } from './MockProvider';
 import { MiMoProvider } from './MiMoProvider';
 import { env } from '../config/env';
 import { logger } from '../config/logger';
@@ -7,12 +6,9 @@ import { logger } from '../config/logger';
 /**
  * Provider registry.
  *
- * Resolves the active AI provider based on the `AI_PROVIDER` env var. Phase 1
- * only registers the mock provider; later phases can register real providers
- * here without touching the services that consume {@link getProvider}.
+ * Resolves the active AI provider based on the `AI_PROVIDER` env var.
  */
 const providers: Record<string, () => AIProvider> = {
-  mock: () => new MockProvider(),
   mimo: () => new MiMoProvider(),
 };
 
@@ -38,10 +34,8 @@ export function getProvider(): AIProvider {
   return cachedProvider;
 }
 
-/** Reset the cached provider. Useful for tests. */
 export function resetProvider(): void {
   cachedProvider = null;
 }
 
 export type { AIProvider } from './AIProvider';
-export { MockProvider } from './MockProvider';

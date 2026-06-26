@@ -707,7 +707,7 @@ export default function Workspace({
                       return (
                         <div 
                           key={msg.id}
-                          className={`flex gap-3 max-w-[85%] w-full ${isUser ? "ml-auto flex-row-reverse text-right" : "text-left"}`}
+                          className={`flex gap-3 ${isUser ? "ml-auto flex-row-reverse text-right w-fit max-w-[65%]" : "text-left w-full max-w-[80%]"}`}
                         >
                           {/* AI profile avatar is our animated/pulsing circle instead of standard Bot profile */}
                           {isUser ? (
@@ -730,10 +730,10 @@ export default function Workspace({
                               <span className="text-[9px] font-mono text-titanium/40">{msg.timestamp}</span>
                             </div>
                             
-                            <div className={`p-3.5 rounded-2xl text-xs md:text-sm font-sans leading-relaxed text-left whitespace-pre-line border ${
+                            <div className={`p-3.5 rounded-2xl text-xs md:text-sm font-sans leading-relaxed border ${
                               isUser
-                                ? "bg-white/5 text-white border-white/10 rounded-tr-none"
-                                : "bg-[#111111]/70 text-titanium/90 border-white/5 rounded-tl-none"
+                                ? "bg-white/5 text-white border-white/10 rounded-tr-none w-fit max-w-full break-words"
+                                : "bg-[#111111]/70 text-titanium/90 border-white/5 rounded-tl-none whitespace-pre-line text-left"
                             }`}>
                               {msg.text}
                             </div>

@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:3000/api';
+const API_BASE = 'http://localhost:3001/api';
 
 export interface ApiSession {
   id: string;
@@ -60,7 +60,7 @@ export async function deleteSession(sessionId: string): Promise<void> {
 }
 
 export async function healthCheck(): Promise<{ status: string }> {
-  const res = await fetch('http://localhost:3000/health');
+  const res = await fetch('http://localhost:3001/health');
   if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
   return res.json();
 }

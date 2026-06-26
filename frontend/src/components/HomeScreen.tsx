@@ -196,7 +196,7 @@ export default function HomeScreen({
                   initial={{ opacity: 0, y: 12, scale: 0.98 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   transition={{ duration: 0.4 }}
-                  className={`flex gap-3 max-w-[85%] w-full ${isUser ? "ml-auto flex-row-reverse text-right" : "text-left"}`}
+                  className={`flex gap-3 ${isUser ? "ml-auto flex-row-reverse text-right w-fit max-w-[65%]" : "text-left w-full max-w-[80%]"}`}
                 >
                   {/* AI profile avatar is our animated/pulsing circle instead of standard Bot profile */}
                   {isUser ? (
@@ -222,10 +222,10 @@ export default function HomeScreen({
 
                     {/* Cloud Speech Bubble */}
                     <div
-                      className={`p-4 rounded-2xl text-xs md:text-sm leading-relaxed whitespace-pre-line shadow-xl border transition-all ${
+                      className={`p-4 rounded-2xl text-xs md:text-sm leading-relaxed shadow-xl border transition-all ${
                         isUser
-                          ? "bg-neural-cyan/[0.08] border-neural-cyan/25 text-white rounded-tr-none shadow-[0_4px_15px_rgba(93,247,255,0.04)]"
-                          : "bg-white/[0.03] border-white/10 text-white/90 rounded-tl-none shadow-[0_4px_15px_rgba(255,255,255,0.01)] backdrop-blur-md"
+                          ? "bg-neural-cyan/[0.08] border-neural-cyan/25 text-white rounded-tr-none shadow-[0_4px_15px_rgba(93,247,255,0.04)] w-fit max-w-full break-words"
+                          : "bg-white/[0.03] border-white/10 text-white/90 rounded-tl-none shadow-[0_4px_15px_rgba(255,255,255,0.01)] backdrop-blur-md whitespace-pre-line"
                       }`}
                     >
                       {msg.text}

@@ -1,42 +1,43 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { 
-  OrbState, 
-  ActiveView, 
-  Message, 
-  FileItem, 
-  Goal, 
+import {
+  OrbState,
+  ActiveView,
+  Message,
+  FileItem,
+  Goal,
   Agent,
   InteractionMode,
   Subject
 } from "./types";
 import { translations } from "./utils/translations";
+import { createSession, sendMessage } from "./api";
 import HomeScreen from "./components/HomeScreen";
-import Workspace from "./components/Workspace";
-import MemorySystem from "./components/MemorySystem";
+// import Workspace from "./components/Workspace";
+// import MemorySystem from "./components/MemorySystem";
 import DashboardSection from "./components/DashboardSection";
-import ProjectsSection from "./components/ProjectsSection";
-import AutomationsSection from "./components/AutomationsSection";
-import IntegrationsSection from "./components/IntegrationsSection";
-import SettingsSection from "./components/SettingsSection";
+// import ProjectsSection from "./components/ProjectsSection";
+// import AutomationsSection from "./components/AutomationsSection";
+// import IntegrationsSection from "./components/IntegrationsSection";
+// import SettingsSection from "./components/SettingsSection";
 
-import { 
-  Compass, 
-  Target, 
-  Users, 
-  Database, 
-  Cpu, 
-  Terminal, 
-  Star, 
-  Home, 
-  ArrowRight, 
-  Menu, 
+import {
+  Compass,
+  Target,
+  Users,
+  Database,
+  Cpu,
+  // Terminal,
+  Star,
+  Home,
+  ArrowRight,
+  Menu,
   X,
   Bell,
   Clock,
   User,
   Power,
-  Layers,
+  // Layers,
   Sparkles,
   ChevronLeft,
   ChevronRight,
@@ -46,10 +47,10 @@ import {
   ChevronDown,
   Briefcase,
   Bot,
-  Zap,
-  Brain,
-  Plug,
-  Settings,
+  // Zap,
+  // Brain,
+  // Plug,
+  // Settings,
   Sun,
   Moon
 } from "lucide-react";
@@ -64,162 +65,21 @@ export default function App() {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [interactionMode, setInteractionMode] = useState<InteractionMode>(InteractionMode.Direct);
 
-  // Initial Mock Files
-  const [files, setFiles] = useState<FileItem[]>([
-    {
-      name: "vesting_program.rs",
-      type: "code",
-      size: "2.4 KB",
-      path: "/src/contracts/vesting_program.rs",
-      content: `use anchor_lang::prelude::*;\n\ndeclare_id!("Vvest11111111111111111111111111111111111111");\n\n#[program]\npub mod vesting_program {\n    use super::*;\n\n    pub fn initialize_vesting_cliff(\n        ctx: Context<InitializeVesting>,\n        cliff_time: i64,\n        vesting_rate: u64,\n    ) -> Result<()> {\n        let state = &mut ctx.accounts.vesting_state;\n        state.cliff_timestamp = cliff_time;\n        state.tokens_per_second = vesting_rate;\n        state.start_time = Clock::get()?.unix_timestamp;\n        Ok(())\n    }\n\n    pub fn withdraw(ctx: Context<Withdraw>) -> Result<()> {\n        let state = &mut ctx.accounts.vesting_state;\n        let now = Clock::get()?.unix_timestamp;\n        require!(now >= state.cliff_timestamp, VestingError::CliffNotReached);\n        \n        let elapsed = now - state.start_time;\n        let withdrawable = (elapsed as u64) * state.tokens_per_second;\n        \n        state.total_withdrawn += withdrawable;\n        Ok(())\n    }\n}\n\n#[derive(Accounts)]\npub struct InitializeVesting<'info> {\n    #[account(init, payer = user, space = 8 + 64)]\n    pub vesting_state: Account<'info, VestingState>,\n    #[account(mut)]\n    pub user: Signer<'info>,\n    pub system_program: Program<'info, System>,\n}\n\n#[derive(Accounts)]\npub struct Withdraw<'info> {\n    #[account(mut)]\n    pub vesting_state: Account<'info, VestingState>,\n    #[account(mut)]\n    pub beneficiary: Signer<'info>,\n}\n\n#[account]\npub struct VestingState {\n    pub cliff_timestamp: i64,\n    pub start_time: i64,\n    pub tokens_per_second: u64,\n    pub total_withdrawn: u64,\n}\n\n#[error_code]\npub enum VestingError {\n    #[msg("Vesting cliff timestamp has not been reached yet.")]\n    CliffNotReached,\n}`
-    },
-    {
-      name: "lib.rs",
-      type: "code",
-      size: "0.8 KB",
-      path: "/src/contracts/lib.rs",
-      content: `pub mod instructions;\npub mod state;\n\nuse anchor_lang::prelude::*;\n\ndeclare_id!("Vvest11111111111111111111111111111111111111");\n\n#[program]\npub mod vesting_program {\n    use super::*;\n}`
-    },
-    {
-      name: "instructions.rs",
-      type: "code",
-      size: "1.2 KB",
-      path: "/src/contracts/instructions.rs",
-      content: `use anchor_lang::prelude::*;\nuse crate::state::*;\n\npub fn initialize_vesting_cliff(\n    ctx: Context<InitializeVesting>,\n    cliff_time: i64,\n    vesting_rate: u64,\n) -> Result<()> {\n    let state = &mut ctx.accounts.vesting_state;\n    state.cliff_timestamp = cliff_time;\n    state.tokens_per_second = vesting_rate;\n    state.start_time = Clock::get()?.unix_timestamp;\n    Ok(())\n}`
-    },
-    {
-      name: "state.rs",
-      type: "code",
-      size: "0.5 KB",
-      path: "/src/contracts/state.rs",
-      content: `use anchor_lang::prelude::*;\n\n#[account]\npub struct VestingState {\n    pub cliff_timestamp: i64,\n    pub start_time: i64,\n    pub tokens_per_second: u64,\n    pub total_withdrawn: u64,\n}`
-    },
-    {
-      name: "Cargo.toml",
-      type: "code",
-      size: "0.4 KB",
-      path: "/Cargo.toml",
-      content: `[package]\nname = "vesting-program"\nversion = "0.1.0"\ndescription = "Solana Vesting Program with Cliff"\nedition = "2021"\n\n[lib]\ncrate-type = ["cdylib", "lib"]\n\n[dependencies]\nanchor-lang = "0.29.0"`
-    },
-    {
-      name: "Anchor.toml",
-      type: "code",
-      size: "0.6 KB",
-      path: "/Anchor.toml",
-      content: `[features]\nseeds = false\nskip-lint = false\n\n[programs.localnet]\nvesting_program = "Vvest11111111111111111111111111111111111111"\n\n[registry]\nurl = "https://api.apr.dev"\n\n[provider]\ncluster = "Localnet"\nwallet = "~/.config/solana/id.json"`
-    },
-    {
-      name: "README.md",
-      type: "document",
-      size: "1.5 KB",
-      path: "/README.md",
-      content: `# Solana Vesting Program\n\nThis program facilitates token vesting on Solana using the Anchor framework.\nIt supports:\n- 6-month cliff release\n- Linear unlocks over 24 months`
-    },
-    {
-      name: "test_vesting.ts",
-      type: "code",
-      size: "1.1 KB",
-      path: "/tests/test_vesting.ts",
-      content: `import * as anchor from "@coral-xyz/anchor";\nimport { Program } from "@coral-xyz/anchor";\nimport { VestingProgram } from "../target/types/vesting_program";\n\ndescribe("vesting_program", () => {\n  anchor.setProvider(anchor.AnchorProvider.env());\n  const program = anchor.workspace.VestingProgram as Program<VestingProgram>;\n\n  it("Is initialized!", async () => {\n    // test initialization\n  });\n});`
-    },
-    {
-      name: "deploy.ts",
-      type: "code",
-      size: "0.8 KB",
-      path: "/scripts/deploy.ts",
-      content: `import { Connection, Keypair } from "@solana/web3.js";\n// Deploy logic for local cluster node\nconsole.log("Initiating Anchor deployment cluster...");`
-    }
-  ]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [backendError, setBackendError] = useState<string | null>(null);
 
-  // Subjects / Conversations state (houses all messages per subject)
+  // const [files, setFiles] = useState<FileItem[]>([...]);
+  // const [projects, setProjects] = useState<any[]>([...]);
+  // const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+
   const [subjects, setSubjects] = useState<Subject[]>([
     {
       id: "1",
-      name: "Consolidated Micro-Frontend Architecture",
-      date: "6 mins ago",
-      dateFa: "۶ دقیقه پیش",
+      name: "New Conversation",
+      date: "Just now",
+      dateFa: "اکنون",
       status: "Active",
-      category: "projects",
-      messages: [
-        {
-          id: "1",
-          sender: "system",
-          text: "MIMO Operating System initialized cleanly inside secure isolated local Sandbox core.",
-          timestamp: "10:05:46"
-        },
-        {
-          id: "2",
-          sender: "agent",
-          agentName: "Scribe-Context",
-          text: "Continuous neural indexing has completed. Extracted 4 parallel software pipelines matching recent session parameters.",
-          timestamp: "10:05:52",
-          tokensPerSec: 1950
-        }
-      ]
-    },
-    {
-      id: "2",
-      name: "Solana Deflationary Tokenomics Vesting",
-      date: "2 hours ago",
-      dateFa: "۲ ساعت پیش",
-      status: "Completed",
-      category: "projects",
-      messages: [
-        {
-          id: "sys-2",
-          sender: "system",
-          text: "Solana runtime environment loaded. Ready to deploy program.",
-          timestamp: "08:12:00"
-        },
-        {
-          id: "agent-2",
-          sender: "agent",
-          agentName: "Scribe-Context",
-          text: "Security baseline established. Awaiting Anchor program details.",
-          timestamp: "08:12:30",
-          tokensPerSec: 1720
-        }
-      ]
-    },
-    {
-      id: "3",
-      name: "Zero-Knowledge Rollup proofing",
-      date: "Yesterday",
-      dateFa: "دیروز",
-      status: "Saved",
-      category: "projects",
-      messages: []
-    },
-    {
-      id: "4",
-      name: "Personal Productivity & Cognitive Focus",
-      date: "3 mins ago",
-      dateFa: "۳ دقیقه پیش",
-      status: "Active",
-      category: "personal",
-      messages: [
-        {
-          id: "sys-4",
-          sender: "system",
-          text: "Personal alignment matrix loaded. System performance is running in high priority mode.",
-          timestamp: "10:15:00"
-        },
-        {
-          id: "agent-4",
-          sender: "agent",
-          agentName: "Cipher-9",
-          text: "Hi Armin. Ready to sync your personal development goals and daily cognitive logs. How can I assist you today?",
-          timestamp: "10:15:30",
-          tokensPerSec: 1890
-        }
-      ]
-    },
-    {
-      id: "5",
-      name: "Healthy Habits & Meditation Planner",
-      date: "2 days ago",
-      dateFa: "۲ روز پیش",
-      status: "Saved",
       category: "personal",
       messages: []
     }
@@ -227,55 +87,6 @@ export default function App() {
   const [activeSubjectId, setActiveSubjectId] = useState<string>("1");
   const [recentPanelOpen, setRecentPanelOpen] = useState<boolean>(true);
   const [assistantDropdownOpen, setAssistantDropdownOpen] = useState<boolean>(true);
-  
-  const [projects, setProjects] = useState<any[]>([
-    {
-      id: "proj-1",
-      name: "Startup Research",
-      date: "6 mins ago",
-      dateFa: "۶ دقیقه پیش",
-      documents: [
-        { name: "market_analysis_2026.pdf", type: "pdf", size: "2.4 MB" },
-        { name: "competitor_matrix.xlsx", type: "spreadsheet", size: "1.1 MB" },
-        { name: "gtm_pitch.docx", type: "document", size: "850 KB" }
-      ],
-      conversations: [
-        {
-          id: "c-1",
-          name: "Market Analysis",
-          messages: [
-            { id: "m-1", sender: "user", text: "Analyze our initial addressable market size.", timestamp: "10:10:00" },
-            { id: "m-2", sender: "agent", text: "Based on the uploaded market_analysis_2026.pdf, your Total Addressable Market (TAM) is estimated at $14.2B with a CAGR of 12.4%.", timestamp: "10:10:15" }
-          ]
-        },
-        {
-          id: "c-2",
-          name: "Competitor Analysis",
-          messages: [
-            { id: "m-3", sender: "user", text: "Who are our primary competitors in security?", timestamp: "10:12:00" },
-            { id: "m-4", sender: "agent", text: "Analyzing competitor_matrix.xlsx, the main competitors are Sentinel-X and SafeLoop, with Sentinel-X leading in market share but lacking automated auditing.", timestamp: "10:12:20" }
-          ]
-        },
-        { id: "c-3", name: "Financial Review", messages: [] },
-        { id: "c-4", name: "GTM Strategy", messages: [] }
-      ]
-    },
-    {
-      id: "proj-2",
-      name: "University Materials & Cognitive Sci",
-      date: "2 hours ago",
-      dateFa: "۲ ساعت پیش",
-      documents: [
-        { name: "cognitive_science_overview.pdf", type: "pdf", size: "5.1 MB" },
-        { name: "neural_correlates_data.csv", type: "csv", size: "1.2 MB" }
-      ],
-      conversations: [
-        { id: "c-5", name: "Literature Review", messages: [] },
-        { id: "c-6", name: "Methodology Design", messages: [] }
-      ]
-    }
-  ]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
 
   // Derived messages for active subject
   const activeSubject = subjects.find(s => s.id === activeSubjectId) || subjects[0];
@@ -304,27 +115,8 @@ export default function App() {
     });
   };
 
-  // Initial Mock Goals
-  const [activeGoals, setActiveGoals] = useState<Goal[]>([
-    {
-      id: "1",
-      title: "Consolidated Micro-Frontend Architecture",
-      description: "Design and bundle an automated low-latency micro-frontend environment supporting real-time WebSockets, Web Worker compilers and sandbox execution directories.",
-      status: "active",
-      progress: 0.65,
-      confidence: 0.98,
-      judgeValidation: "[JUDGE_PASS] All 14 security sandboxing rules and context leakage tests verified. Code compiled safely."
-    },
-    {
-      id: "2",
-      title: "Solana Deflationary Tokenomics Vesting Wrapper",
-      description: "Draft highly protective Anchor programs containing mathematical cliff-aligned vesting schedules. Run extensive gas optimization reviews.",
-      status: "active",
-      progress: 0.28,
-      confidence: 0.94,
-      judgeValidation: "[JUDGE_PENDING] Critical testing coverage is at 45%. Awaiting mathematical overflow verification from Cipher-9."
-    }
-  ]);
+  // const [activeGoals, setActiveGoals] = useState<Goal[]>([...]);
+  const [activeGoals] = useState<Goal[]>([]);
 
   // Handle dynamic system clock updating
   useEffect(() => {
@@ -354,7 +146,7 @@ export default function App() {
   };
 
   // Automated trigger responses to represent true 2030 intelligence simulation
-  const handleExecuteCommand = (cmd: string) => {
+  const handleExecuteCommand = async (cmd: string) => {
     const userMsg: Message = {
       id: String(Date.now()),
       sender: "user",
@@ -364,69 +156,46 @@ export default function App() {
 
     setMessages(prev => [...prev, userMsg]);
     setOrbState(OrbState.Thinking);
-    triggerNotification(language === "fa" ? "در حال ارسال توکن پردازشی..." : "Injecting pipeline token...");
+    setIsLoading(true);
+    setBackendError(null);
 
-    // Stage 1: Thinking response
-    setTimeout(() => {
-      setOrbState(OrbState.Researching);
-      triggerNotification(language === "fa" ? "در حال کاوش در مراجع خارجی..." : "Researching external repositories...");
-    }, 1200);
-
-    // Stage 2: Executing response (creating mock code files or tasks)
-    setTimeout(() => {
-      setOrbState(OrbState.Executing);
-      triggerNotification(language === "fa" ? "در حال اجرای حلقه‌های کامپایل مستقل..." : "Autonomous compile loops running...");
-      
-      const newFile: FileItem = {
-        name: "vesting_program.rs",
-        type: "code",
-        size: "1.9 KB",
-        path: "/src/contracts/vesting_program.rs",
-        content: `// Anchor-based Solana vesting program synthesized automatically by Cipher-9\nuse anchor_lang::prelude::*;\n\ndeclare_id!("Vvest11111111111111111111111111111111111111");\n\n#[program]\npub mod vesting_program {\n    use super::*;\n\n    pub fn initialize_vesting_cliff(\n        ctx: Context<InitializeVest>,\n        cliff_time: i64,\n        vesting_rate: u64\n    ) -> Result<()> {\n        let state = &mut ctx.accounts.vesting_state;\n        state.cliff_timestamp = cliff_time;\n        state.tokens_per_second = vesting_rate;\n        Ok(())\n    }\n}`
-      };
-
-      setFiles(prev => [newFile, ...prev]);
-    }, 2800);
-
-    // Stage 3: Completed Response
-    setTimeout(() => {
-      setOrbState(OrbState.Completed);
-      triggerNotification(language === "fa" ? "مأموریت شناختی با موفقیت به پایان رسید." : "Autonomous goal completed successfully.");
-
-      let textResponse = "";
-      if (language === "fa") {
-        if (interactionMode === InteractionMode.Direct) {
-          textResponse = `توافق شناختی بر روی دستور شما حاصل شد: "${cmd}". فایل جدید 'vesting_program.rs' در فضای کاری ایجاد شد. تمامی ممیزی‌های ریاضیاتی و بررسی‌های سرریز عددی توسط ناظر سیستم تأیید و در سندباکس ایمن بارگذاری گردید.`;
-        } else if (interactionMode === InteractionMode.Plan) {
-          textResponse = `برنامه راهبردی گام‌به‌گام برای تحقق "${cmd}" با موفقیت تدوین شد:\n\n۱. [✓] تحلیل ساختار قرارداد هوشمند و نیازمندی‌ها\n۲. [✓] نگاشت فایل ساختاری 'vesting_program.rs'\n۳. [ ] بهینه‌سازی محاسباتی مصرف سوخت (Gas Optimization)\n۴. [ ] انجام سناریوهای حمله دابل اسپندینگ در سندباکس`;
-        } else {
-          textResponse = `عملیات عصبی به عامل‌های خودگردان محول شد:\n- **سایفر-۹** فایل 'vesting_program.rs' را با موفقیت سنتز کرد.\n- **سنتری-۹** ایزوله‌سازی امن حافظه و تطبیق مجوزها را تأیید نمود.\n- **معمار هوش مصنوعی** الگوی ساختاری نهایی را با موفقیت پیاده کرد.`;
-        }
-      } else {
-        if (interactionMode === InteractionMode.Direct) {
-          textResponse = `Consensus reached on cognitive goal: "${cmd}". Created file 'vesting_program.rs' inside workspace. Anchor compilation checks and standard re-entrancy mathematical locks have been fully applied and verified by the Judge.`;
-        } else if (interactionMode === InteractionMode.Plan) {
-          textResponse = `Strategic step-by-step roadmap distilled for task "${cmd}":\n\n1. [✓] Core compilation analysis and Rust module drafting\n2. [✓] Generated 'vesting_program.rs' structure in your filesystem\n3. [ ] Perform advanced security sandboxing tests\n4. [ ] Initiate mathematical lock overflow verification via Cipher-9`;
-        } else {
-          textResponse = `Autonomous neural delegation completed for: "${cmd}":\n- **Cipher-9** synthesized 'vesting_program.rs' using high confidence weights.\n- **Sentry.v9** verified compilation and memory safety parameters.\n- **Scribe-Context** logged and indexed the newly updated code pathways.`;
-        }
+    try {
+      let currentSessionId = sessionId;
+      if (!currentSessionId) {
+        const session = await createSession();
+        currentSessionId = session.id;
+        setSessionId(session.id);
       }
 
-      const responseMsg: Message = {
-        id: String(Date.now() + 1),
+      const response = await sendMessage(currentSessionId, cmd);
+
+      const agentMsg: Message = {
+        id: response.message.id,
         sender: "agent",
-        agentName: language === "fa" ? "سایفر-۹" : "Cipher-9",
-        text: textResponse,
+        agentName: "MiMo",
+        text: response.message.content,
         timestamp: new Date().toLocaleTimeString(language === "fa" ? "fa-IR" : "en-US", { hour: "2-digit", minute: "2-digit" }),
-        tokensPerSec: 1840
+        tokensPerSec: 0
       };
 
-      setMessages(prev => [...prev, responseMsg]);
-    }, 4500);
-
-    setTimeout(() => {
+      setMessages(prev => [...prev, agentMsg]);
+      setOrbState(OrbState.Completed);
+      setTimeout(() => setOrbState(OrbState.Idle), 2000);
+    } catch (err: any) {
+      console.error('Chat error:', err);
+      setBackendError(err.message || 'Failed to connect to backend');
       setOrbState(OrbState.Idle);
-    }, 7000);
+
+      const errorMsg: Message = {
+        id: String(Date.now() + 1),
+        sender: "system",
+        text: `Error: ${err.message || 'Could not connect to backend. Make sure the backend is running on port 3000.'}`,
+        timestamp: new Date().toLocaleTimeString(language === "fa" ? "fa-IR" : "en-US", { hour: "2-digit", minute: "2-digit" })
+      };
+      setMessages(prev => [...prev, errorMsg]);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const selectAssistantView = (view: ActiveView) => {
@@ -460,11 +229,12 @@ export default function App() {
   const menuItems = [
     { view: ActiveView.Home, label: "Home", icon: Home },
     { view: "AssistantParent", label: "Assistant", icon: MessageSquare, isParent: true },
-    { view: ActiveView.Workspace, label: "Workspace", icon: Terminal },
-    { view: ActiveView.Automations, label: "Automations", icon: Zap },
-    { view: ActiveView.Memory, label: "Memory", icon: Brain },
-    { view: ActiveView.Integrations, label: "Integrations", icon: Plug },
-    { view: ActiveView.Settings, label: "Settings", icon: Settings }
+    // STEP 2+ — COMMENTED OUT
+    // { view: ActiveView.Workspace, label: "Workspace", icon: Terminal },
+    // { view: ActiveView.Automations, label: "Automations", icon: Zap },
+    // { view: ActiveView.Memory, label: "Memory", icon: Brain },
+    // { view: ActiveView.Integrations, label: "Integrations", icon: Plug },
+    // { view: ActiveView.Settings, label: "Settings", icon: Settings }
   ];
 
   return (
@@ -941,33 +711,28 @@ export default function App() {
               className="absolute inset-0 w-full h-full"
             >
               {activeView === ActiveView.Home && (
-                <DashboardSection 
+                <DashboardSection
                   language={language}
                   onNavigate={(view) => {
                     if (view === "AssistantPersonal") {
                       selectAssistantView(ActiveView.AssistantPersonal);
-                    } else if (view === "AssistantProjects") {
-                      selectAssistantView(ActiveView.AssistantProjects);
                     } else {
                       setActiveView(view);
                     }
                   }}
-                  onNavigateToProject={(projId) => {
-                    setSelectedProjectId(projId);
-                    selectAssistantView(ActiveView.AssistantProjects);
-                  }}
+                  onNavigateToProject={() => {}}
                   onNavigateToChat={(chatId) => {
                     setActiveSubjectId(chatId);
                     selectAssistantView(ActiveView.AssistantPersonal);
                   }}
                   subjects={subjects}
-                  projects={projects}
+                  projects={[]}
                   orbState={orbState}
                 />
               )}
 
               {activeView === ActiveView.AssistantPersonal && (
-                <HomeScreen 
+                <HomeScreen
                   orbState={orbState}
                   setOrbState={setOrbState}
                   onNavigate={(view) => setActiveView(view)}
@@ -981,8 +746,9 @@ export default function App() {
                 />
               )}
 
+              {/* STEP 2+ FEATURES — COMMENTED OUT
               {activeView === ActiveView.AssistantProjects && (
-                <ProjectsSection 
+                <ProjectsSection
                   language={language}
                   projects={projects}
                   setProjects={setProjects}
@@ -992,7 +758,7 @@ export default function App() {
               )}
 
               {activeView === ActiveView.Workspace && (
-                <Workspace 
+                <Workspace
                   orbState={orbState}
                   setOrbState={setOrbState}
                   messages={messages}
@@ -1008,19 +774,19 @@ export default function App() {
               )}
 
               {activeView === ActiveView.Automations && (
-                <AutomationsSection 
+                <AutomationsSection
                   language={language}
                   onTriggerAutomation={(prompt) => {
                     selectAssistantView(ActiveView.AssistantPersonal);
                     setMessages(prev => [
-                      ...prev, 
+                      ...prev,
                       { id: `auto-${Date.now()}`, sender: "user", text: prompt, timestamp: new Date().toLocaleTimeString() }
                     ]);
                     setOrbState(OrbState.Executing);
                     setTimeout(() => {
                       setMessages(prev => [
                         ...prev,
-                        { id: `auto-res-${Date.now()}`, sender: "agent", agentName: "Planning Agent", text: "Automation pipeline executed successfully. Target sweep completed, compiled logs generated in sandbox.", timestamp: new Date().toLocaleTimeString() }
+                        { id: `auto-res-${Date.now()}`, sender: "agent", agentName: "Planning Agent", text: "Automation pipeline executed successfully.", timestamp: new Date().toLocaleTimeString() }
                       ]);
                       setOrbState(OrbState.Idle);
                     }, 2500);
@@ -1037,12 +803,13 @@ export default function App() {
               )}
 
               {activeView === ActiveView.Settings && (
-                <SettingsSection 
-                  language={language} 
+                <SettingsSection
+                  language={language}
                   theme={theme}
                   setTheme={setTheme}
                 />
               )}
+              */}
             </motion.div>
           </AnimatePresence>
         </div>

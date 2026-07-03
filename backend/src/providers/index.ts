@@ -1,5 +1,7 @@
 import type { AIProvider } from './AIProvider';
+import { MockProvider } from './MockProvider';
 import { MiMoProvider } from './MiMoProvider';
+import { MimoCliProvider } from './MimoCliProvider';
 import { env } from '../config/env';
 import { logger } from '../config/logger';
 
@@ -9,7 +11,9 @@ import { logger } from '../config/logger';
  * Resolves the active AI provider based on the `AI_PROVIDER` env var.
  */
 const providers: Record<string, () => AIProvider> = {
+  mock: () => new MockProvider(),
   mimo: () => new MiMoProvider(),
+  'mimo-cli': () => new MimoCliProvider(),
 };
 
 let cachedProvider: AIProvider | null = null;
@@ -19,7 +23,17 @@ export function getProvider(): AIProvider {
     return cachedProvider;
   }
 
-  const name = env.aiProvider;
+  let name = env.aiProvider;
+
+  // Auto-detect: prefer mimo-cli if available, then mimo with API key, else mock
+  if (name === 'mock') {
+    if (env.mimoApiKey) {
+      name = 'mimo';
+    } else {
+      name = 'mimo-cli';
+    }
+  }
+
   const factory = providers[name];
 
   if (!factory) {

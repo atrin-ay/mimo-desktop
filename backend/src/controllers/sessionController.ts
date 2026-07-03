@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { sessionService } from '../services/sessionService';
+import { getProvider } from '../providers';
 import type { ApiResponse, Session, SessionWithMessages } from '../types';
 
 /** POST /api/session — create a new session. */
@@ -49,4 +50,63 @@ export function deleteSession(
   }
 }
 
-export default { createSession, getSession, deleteSession };
+/** GET /api/cli/sessions — list sessions from MiMo CLI. */
+export async function listCliSessions(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const provider = getProvider() as any;
+    if (typeof provider.listSessions !== 'function') {
+      res.status(501).json({ error: { code: 'not_supported', message: 'CLI session listing not available' } });
+      return;
+    }
+    const sessions = await provider.listSessions();
+    res.status(200).json({ data: sessions });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** GET /api/cli/sessions/:id/export — export a session from MiMo CLI. */
+export async function exportCliSession(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const id = req.params.id as string;
+    const provider = getProvider() as any;
+    if (typeof provider.exportSession !== 'function') {
+      res.status(501).json({ error: { code: 'not_supported', message: 'CLI session export not available' } });
+      return;
+    }
+    const data = await provider.exportSession(id);
+    res.status(200).json({ data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** DELETE /api/cli/sessions/:id — delete a session from MiMo CLI. */
+export async function deleteCliSession(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const id = req.params.id as string;
+    const provider = getProvider() as any;
+    if (typeof provider.deleteSession !== 'function') {
+      res.status(501).json({ error: { code: 'not_supported', message: 'CLI session deletion not available' } });
+      return;
+    }
+    await provider.deleteSession(id);
+    res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+}
+
+export default { createSession, getSession, deleteSession, listCliSessions, exportCliSession, deleteCliSession };

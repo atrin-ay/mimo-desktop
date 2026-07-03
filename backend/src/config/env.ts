@@ -23,6 +23,9 @@ export interface EnvConfig {
   logLevel: string;
   databasePath: string;
   aiProvider: string;
+  mimoApiKey: string;
+  mimoBaseUrl: string;
+  mimoModel: string;
 }
 
 function loadEnv(): EnvConfig {
@@ -31,7 +34,10 @@ function loadEnv(): EnvConfig {
   const corsOrigins = parseCorsOrigin(process.env.CORS_ORIGIN);
   const logLevel = process.env.LOG_LEVEL ?? 'info';
   const databasePath = process.env.DATABASE_PATH ?? './data/mimo.db';
-  const aiProvider = process.env.AI_PROVIDER ?? 'mimo';
+  const aiProvider = process.env.AI_PROVIDER ?? (process.env.MIMO_API_KEY ? 'mimo' : 'mock');
+  const mimoApiKey = process.env.MIMO_API_KEY ?? '';
+  const mimoBaseUrl = process.env.MIMO_BASE_URL ?? 'https://api.siliconflow.cn/v1';
+  const mimoModel = process.env.MIMO_MODEL ?? 'Qwen/Qwen3-8B';
 
   return {
     port,
@@ -40,6 +46,9 @@ function loadEnv(): EnvConfig {
     logLevel,
     databasePath,
     aiProvider,
+    mimoApiKey,
+    mimoBaseUrl,
+    mimoModel,
   };
 }
 

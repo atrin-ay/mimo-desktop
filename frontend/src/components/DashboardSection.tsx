@@ -78,7 +78,7 @@ export default function DashboardSection({
             <Orb 
               state={orbState} 
               size={180} 
-              onClick={() => onNavigate("AssistantPersonal")}
+              onClick={() => onNavigate("Chat")}
             />
           </div>
         </div>
@@ -137,7 +137,7 @@ export default function DashboardSection({
                 {language === "fa" ? "گفتگوهای شخصی اخیر" : "Recent Personal Chats"}
               </h3>
               <button 
-                onClick={() => onNavigate("AssistantPersonal")}
+                onClick={() => onNavigate("Chat")}
                 className="text-[10px] text-titanium/40 hover:text-white flex items-center gap-1 font-mono uppercase"
               >
                 {language === "fa" ? "مشاهده همه" : "View All"} <ArrowRight size={10} />
@@ -170,7 +170,7 @@ export default function DashboardSection({
           </div>
 
           <button 
-            onClick={() => onNavigate("AssistantPersonal")}
+            onClick={() => onNavigate("Chat")}
             className="w-full mt-4 py-2 bg-neural-cyan/10 hover:bg-neural-cyan/20 border border-neural-cyan/25 rounded-xl text-xs font-semibold text-neural-cyan flex items-center justify-center gap-1.5 transition-all cursor-pointer font-sans"
           >
             <Plus size={12} />
@@ -187,7 +187,7 @@ export default function DashboardSection({
                 {language === "fa" ? "پروژه‌های اخیر" : "Recent Projects"}
               </h3>
               <button 
-                onClick={() => onNavigate("AssistantProjects")}
+                onClick={() => onNavigate("Projects")}
                 className="text-[10px] text-titanium/40 hover:text-white flex items-center gap-1 font-mono uppercase"
               >
                 {language === "fa" ? "مشاهده همه" : "View All"} <ArrowRight size={10} />
@@ -214,7 +214,7 @@ export default function DashboardSection({
           </div>
 
           <button 
-            onClick={() => onNavigate("AssistantProjects")}
+            onClick={() => onNavigate("Projects")}
             className="w-full mt-4 py-2 bg-neural-cyan/10 hover:bg-neural-cyan/20 border border-neural-cyan/25 rounded-xl text-xs font-semibold text-neural-cyan flex items-center justify-center gap-1.5 transition-all cursor-pointer font-sans"
           >
             <FolderPlus size={12} />

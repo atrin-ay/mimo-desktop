@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   OrbState,
@@ -8,18 +8,16 @@ import {
   Goal,
   Agent,
   InteractionMode,
-  Subject
+  Subject,
+  ActivityEntry,
+  ExportedSession,
+  ExportedMessage
 } from "./types";
 import { translations } from "./utils/translations";
-import { createSession, sendMessage } from "./api";
+import { createSession, getSession, sendMessage, listCliSessions, exportCliSession, streamChat, deleteCliSession, deleteSession } from "./api";
 import HomeScreen from "./components/HomeScreen";
-// import Workspace from "./components/Workspace";
-// import MemorySystem from "./components/MemorySystem";
 import DashboardSection from "./components/DashboardSection";
-// import ProjectsSection from "./components/ProjectsSection";
-// import AutomationsSection from "./components/AutomationsSection";
-// import IntegrationsSection from "./components/IntegrationsSection";
-// import SettingsSection from "./components/SettingsSection";
+import SettingsSection from "./components/SettingsSection";
 
 import {
   Compass,
@@ -44,13 +42,12 @@ import {
   Plus,
   Trash2,
   MessageSquare,
-  ChevronDown,
   Briefcase,
   Bot,
   // Zap,
   // Brain,
   // Plug,
-  // Settings,
+  Settings,
   Sun,
   Moon
 } from "lucide-react";
@@ -68,10 +65,10 @@ export default function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [backendError, setBackendError] = useState<string | null>(null);
+  const [activityLog, setActivityLog] = useState<ActivityEntry[]>([]);
+  const [deleteTarget, setDeleteTarget] = useState<Subject | null>(null);
 
-  // const [files, setFiles] = useState<FileItem[]>([...]);
-  // const [projects, setProjects] = useState<any[]>([...]);
-  // const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+  const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
   const [subjects, setSubjects] = useState<Subject[]>([
     {
@@ -86,7 +83,64 @@ export default function App() {
   ]);
   const [activeSubjectId, setActiveSubjectId] = useState<string>("1");
   const [recentPanelOpen, setRecentPanelOpen] = useState<boolean>(true);
-  const [assistantDropdownOpen, setAssistantDropdownOpen] = useState<boolean>(true);
+
+  useEffect(() => {
+    const activeSubject = subjects.find((subject) => subject.id === activeSubjectId);
+    if (activeSubject && isUuid(activeSubject.id) && activeSubject.id !== sessionId) {
+      setSessionId(activeSubject.id);
+    }
+
+    if (activeSubject && !isUuid(activeSubject.id) && sessionId) {
+      setSessionId(null);
+    }
+  }, [activeSubjectId, subjects, sessionId]);
+
+  useEffect(() => {
+    if (!sessionId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadSessionMessages = async () => {
+      try {
+        const result = await getSession(sessionId);
+        if (cancelled) return;
+
+        setSubjects((prevSubjects) =>
+          prevSubjects.map((subject) => {
+            if (subject.id !== sessionId) {
+              return subject;
+            }
+            return {
+              ...subject,
+              messages: result.messages.map((message) => ({
+                id: message.id,
+                sender: message.role === 'assistant' ? 'agent' : 'user',
+                text: message.content,
+                timestamp: new Date(message.createdAt).toLocaleTimeString(
+                  language === 'fa' ? 'fa-IR' : 'en-US',
+                  { hour: '2-digit', minute: '2-digit' },
+                ),
+              })),
+            };
+          }),
+        );
+      } catch (err: any) {
+        setBackendError(err.message || 'Failed to load session');
+      }
+    };
+
+    loadSessionMessages();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, language]);
+
+  // const [files, setFiles] = useState<FileItem[]>([...]);
+  // const [projects, setProjects] = useState<any[]>([...]);
+  // const [selectedProjectId, setSelectedProjectId] = useState<string>("");
 
   // Derived messages for active subject
   const activeSubject = subjects.find(s => s.id === activeSubjectId) || subjects[0];
@@ -145,46 +199,262 @@ export default function App() {
     }, 4500);
   };
 
+  // Load CLI sessions on startup
+  useEffect(() => {
+    const loadCliSessions = async () => {
+      try {
+        const cliSessions = await listCliSessions();
+        if (cliSessions.length > 0) {
+          // Convert CLI sessions to Subject format
+          const converted: Subject[] = cliSessions.map(s => ({
+            id: s.id,
+            name: s.title || 'New Session',
+            date: new Date(s.updatedAt).toLocaleTimeString(language === "fa" ? "fa-IR" : "en-US", { hour: "2-digit", minute: "2-digit" }),
+            dateFa: new Date(s.updatedAt).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" }),
+            status: "Active",
+            messages: [],
+            category: "personal" as const,
+          }));
+
+          // Load messages for the most recent session
+          const latestSession = cliSessions[0];
+          try {
+            const exported: ExportedSession = await exportCliSession(latestSession.id);
+            if (exported?.messages) {
+              const restoredMessages: Message[] = exported.messages
+                .filter((m: ExportedMessage) => m.info && m.parts)
+                .map((m: ExportedMessage) => ({
+                  id: m.info.id,
+                  sender: m.info.role === 'user' ? 'user' as const : 'agent' as const,
+                  text: m.parts.filter((p: any) => p.type === 'text').map((p: any) => p.text || '').join(''),
+                  timestamp: new Date(m.info.time?.created || Date.now()).toLocaleTimeString(language === "fa" ? "fa-IR" : "en-US", { hour: "2-digit", minute: "2-digit" }),
+                }))
+                .filter((m: Message) => m.text);
+
+              converted[0].messages = restoredMessages;
+            }
+          } catch (err) {
+            console.log('Could not export session:', err);
+          }
+
+          setSubjects(converted);
+          setActiveSubjectId(converted[0].id);
+        }
+      } catch (err) {
+        console.log('Could not load CLI sessions:', err);
+      }
+    };
+    loadCliSessions();
+  }, [language]);
+
   // Automated trigger responses to represent true 2030 intelligence simulation
   const handleExecuteCommand = async (cmd: string) => {
-    const userMsg: Message = {
-      id: String(Date.now()),
-      sender: "user",
-      text: cmd,
-      timestamp: new Date().toLocaleTimeString(language === "fa" ? "fa-IR" : "en-US", { hour: "2-digit", minute: "2-digit" })
-    };
-
-    setMessages(prev => [...prev, userMsg]);
     setOrbState(OrbState.Thinking);
     setIsLoading(true);
     setBackendError(null);
+    setActivityLog([
+      { id: `act_start`, type: 'step', label: 'Starting', detail: 'Initializing MiMo CLI...', icon: '🚀', iconColor: '#5DF7FF', timestamp: Date.now(), status: 'running' }
+    ]);
 
     try {
-      let currentSessionId = sessionId;
+      let currentSessionId = sessionId || (isUuid(activeSubjectId) ? activeSubjectId : null);
+      if (currentSessionId && !sessionId) {
+        setSessionId(currentSessionId);
+      }
+
       if (!currentSessionId) {
         const session = await createSession();
         currentSessionId = session.id;
         setSessionId(session.id);
+
+        setSubjects((prev) => {
+          const currentSubject = prev.find((subject) => subject.id === activeSubjectId);
+          if (currentSubject && currentSubject.messages.length === 0) {
+            return prev.map((subject) =>
+              subject.id === activeSubjectId
+                ? {
+                    ...subject,
+                    id: session.id,
+                    name: language === "fa" ? "کانال گفتگوی جدید" : "New Conversation",
+                  }
+                : subject,
+            );
+          }
+
+          const newSubject: Subject = {
+            id: session.id,
+            name: language === "fa" ? "کانال گفتگوی جدید" : "New Conversation",
+            date: language === "fa" ? "اکنون" : "Just now",
+            dateFa: language === "fa" ? "اکنون" : "Just now",
+            status: "Active",
+            category: "personal",
+            messages: [],
+          };
+
+          return [newSubject, ...prev];
+        });
+
+        setActiveSubjectId(session.id);
       }
 
-      const response = await sendMessage(currentSessionId, cmd);
-
-      const agentMsg: Message = {
-        id: response.message.id,
-        sender: "agent",
-        agentName: "MiMo",
-        text: response.message.content,
+      const userMsg: Message = {
+        id: String(Date.now()),
+        sender: "user",
+        text: cmd,
         timestamp: new Date().toLocaleTimeString(language === "fa" ? "fa-IR" : "en-US", { hour: "2-digit", minute: "2-digit" }),
-        tokensPerSec: 0
       };
 
-      setMessages(prev => [...prev, agentMsg]);
+      setSubjects((prev) =>
+        prev.map((subject) =>
+          subject.id === currentSessionId
+            ? { ...subject, messages: [...subject.messages, userMsg] }
+            : subject,
+        ),
+      );
+
+      // Stream events from MiMo CLI
+      let agentText = '';
+      let activityId = `act_start`;
+
+      const updateActivity = (id: string, updates: Partial<ActivityEntry>) => {
+        setActivityLog(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
+      };
+
+      const addActivity = (entry: Omit<ActivityEntry, 'id' | 'timestamp'>) => {
+        const id = `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        setActivityLog(prev => [...prev, { ...entry, id, timestamp: Date.now() }]);
+        return id;
+      };
+
+      // Mark start as completed
+      updateActivity('act_start', { status: 'completed', detail: 'CLI connected' });
+
+      try {
+        for await (const event of streamChat(currentSessionId, cmd, interactionMode)) {
+          switch (event.type) {
+            case 'step_start':
+              activityId = addActivity({
+                type: 'step',
+                label: 'Processing',
+                detail: 'MiMo is working...',
+                icon: '⚙️',
+                iconColor: '#94a3b8',
+                status: 'running',
+              });
+              break;
+
+            case 'text':
+              if (event.part?.text) {
+                agentText += event.part.text;
+                updateActivity(activityId, { status: 'completed' });
+              }
+              break;
+
+            case 'tool_use':
+              if (event.part?.tool) {
+                const toolName = event.part.tool;
+                const toolIcons: Record<string, { icon: string; label: string; color: string }> = {
+                  bash: { icon: '💻', label: 'Running command', color: '#a78bfa' },
+                  read: { icon: '📂', label: 'Reading file', color: '#60a5fa' },
+                  write: { icon: '📝', label: 'Writing file', color: '#34d399' },
+                  edit: { icon: '✏️', label: 'Editing file', color: '#fbbf24' },
+                  glob: { icon: '🔍', label: 'Searching files', color: '#38bdf8' },
+                  grep: { icon: '🔍', label: 'Searching content', color: '#38bdf8' },
+                };
+                const info = toolIcons[toolName] || { icon: '⚙️', label: toolName, color: '#94a3b8' };
+                const cmd = event.part.state?.input?.command;
+                const filePath = event.part.state?.input?.filePath || event.part.state?.input?.path;
+                const detail = cmd ? String(cmd).slice(0, 50) : filePath ? String(filePath).split(/[/\\]/).pop() || '' : '';
+
+                activityId = addActivity({
+                  type: 'tool',
+                  toolName,
+                  label: info.label,
+                  detail,
+                  icon: info.icon,
+                  iconColor: info.color,
+                  status: event.part.state?.status === 'completed' ? 'completed' : 'running',
+                });
+              }
+              break;
+
+            case 'reasoning':
+              if (event.part?.text) {
+                activityId = addActivity({
+                  type: 'reasoning',
+                  label: 'Thinking',
+                  detail: event.part.text.slice(0, 80),
+                  icon: '🧠',
+                  iconColor: '#c084fc',
+                  status: 'running',
+                });
+              }
+              break;
+
+            case 'step_finish':
+              setActivityLog(prev => prev.map(a => a.status === 'running' ? { ...a, status: 'completed' } : a));
+              break;
+
+            case 'error':
+              setActivityLog(prev => prev.map(a => a.status === 'running' ? { ...a, status: 'error', detail: event.message || 'Error' } : a));
+              break;
+
+            case 'state':
+              if (event.state && event.label) {
+                const stateIcons: Record<string, string> = {
+                  thinking: '🧠',
+                  planning: '💭',
+                  reading: '📂',
+                  searching: '🔍',
+                  executing: '⚙️',
+                  generating: '✨',
+                };
+                activityId = addActivity({
+                  type: 'step',
+                  label: event.label,
+                  detail: '',
+                  icon: stateIcons[String(event.state)] || '⚙️',
+                  iconColor: '#94a3b8',
+                  status: 'running',
+                });
+              }
+              break;
+          }
+        }
+      } catch (streamErr) {
+        // Fallback to non-streaming if SSE fails
+        console.log('Streaming failed, falling back to regular chat:', streamErr);
+        const response = await sendMessage(currentSessionId, cmd, interactionMode);
+        agentText = response.message.content;
+      }
+
+      // Add the final agent message
+      if (agentText) {
+        const agentMsg: Message = {
+          id: `agent_${Date.now()}`,
+          sender: "agent",
+          agentName: "MiMo",
+          text: agentText,
+          timestamp: new Date().toLocaleTimeString(language === "fa" ? "fa-IR" : "en-US", { hour: "2-digit", minute: "2-digit" }),
+        };
+
+        setSubjects((prev) =>
+          prev.map((subject) =>
+            subject.id === currentSessionId
+              ? { ...subject, messages: [...subject.messages, agentMsg] }
+              : subject,
+          ),
+        );
+      }
+
+      setActivityLog(prev => prev.map(a => a.status === 'running' ? { ...a, status: 'completed' } : a));
       setOrbState(OrbState.Completed);
       setTimeout(() => setOrbState(OrbState.Idle), 2000);
     } catch (err: any) {
       console.error('Chat error:', err);
       setBackendError(err.message || 'Failed to connect to backend');
       setOrbState(OrbState.Idle);
+      setActivityLog(prev => prev.map(a => a.status === 'running' ? { ...a, status: 'error', detail: err.message || 'Failed' } : a));
 
       const errorMsg: Message = {
         id: String(Date.now() + 1),
@@ -200,7 +470,7 @@ export default function App() {
 
   const selectAssistantView = (view: ActiveView) => {
     setActiveView(view);
-    const cat = view === ActiveView.AssistantPersonal ? "personal" : "projects";
+    const cat = view === ActiveView.Chat ? "personal" : "projects";
     const firstSub = subjects.find(s => s.category === cat);
     if (firstSub) {
       setActiveSubjectId(firstSub.id);
@@ -211,24 +481,24 @@ export default function App() {
     const t = translations[language];
     switch (view) {
       case ActiveView.Home: return t.home;
-      case "AssistantParent": return t.assistant;
+      case ActiveView.Chat: return t.chat;
+      case ActiveView.Projects: return t.projects;
       case ActiveView.Workspace: return t.navWorkspace;
       case ActiveView.Automations: return t.automations;
       case ActiveView.Memory: return t.memory;
       case ActiveView.Integrations: return t.integrations;
       case ActiveView.Settings: return t.settings;
-      case ActiveView.AssistantPersonal: return t.personal;
-      case ActiveView.AssistantProjects: return t.projects;
       default: return "";
     }
   };
 
-  const isAssistantView = activeView === ActiveView.AssistantPersonal || activeView === ActiveView.AssistantProjects;
-  const currentCategory = activeView === ActiveView.AssistantPersonal ? "personal" : "projects";
+  const currentCategory = activeView === ActiveView.Chat ? "personal" : "projects";
 
   const menuItems = [
     { view: ActiveView.Home, label: "Home", icon: Home },
-    { view: "AssistantParent", label: "Assistant", icon: MessageSquare, isParent: true },
+    { view: ActiveView.Chat, label: "Chat", icon: MessageSquare },
+    { view: ActiveView.Projects, label: "Projects", icon: Briefcase },
+    { view: ActiveView.Settings, label: "Settings", icon: Settings },
     // STEP 2+ — COMMENTED OUT
     // { view: ActiveView.Workspace, label: "Workspace", icon: Terminal },
     // { view: ActiveView.Automations, label: "Automations", icon: Zap },
@@ -268,86 +538,6 @@ export default function App() {
         <div className="flex flex-col gap-2 w-full my-6 overflow-y-auto max-h-[75vh] scrollbar-none">
           {menuItems.map((item) => {
             const Icon = item.icon;
-            
-            if (item.isParent) {
-              const isAssistantActive = activeView === ActiveView.AssistantPersonal || activeView === ActiveView.AssistantProjects;
-              return (
-                <div key={item.view} className="flex flex-col gap-1 w-full">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setAssistantDropdownOpen(!assistantDropdownOpen);
-                    }}
-                    className={`flex items-center justify-between px-3 py-3 rounded-xl transition-all duration-300 w-full cursor-pointer relative ${
-                      isAssistantActive
-                        ? "bg-white/5 text-neural-cyan border border-white/5"
-                        : "text-titanium/50 hover:text-white hover:bg-white/3"
-                    }`}
-                    title={translations[language].assistant}
-                  >
-                    <div className="flex items-center gap-3.5">
-                      <Icon size={18} className={isAssistantActive ? "text-neural-cyan" : "text-titanium/50"} />
-                      <span className="hidden group-hover:block text-xs font-semibold font-sans truncate select-none">
-                        {translations[language].assistant}
-                      </span>
-                    </div>
-                    <ChevronDown 
-                      size={14} 
-                      className={`hidden group-hover:block transition-transform duration-300 ${
-                        assistantDropdownOpen ? "rotate-0" : "-rotate-90"
-                      } ${isAssistantActive ? "text-neural-cyan" : "text-titanium/40"}`} 
-                    />
-                    
-                    {/* Active neon dot when collapsed sidebar is active on child */}
-                    {isAssistantActive && (
-                      <span className="absolute right-3 w-1 h-1 bg-neural-cyan rounded-full shadow-[0_0_8px_rgba(93,247,255,0.8)] md:group-hover:hidden" />
-                    )}
-                  </button>
-
-                  {/* Submenus (Personal, Projects) - Collapses when sidebar is collapsed */}
-                  {assistantDropdownOpen && (
-                    <div className="hidden group-hover:flex flex-col gap-1 w-full pl-4 transition-all duration-300">
-                      {/* Personal Sub-item */}
-                      <button
-                        onClick={() => selectAssistantView(ActiveView.AssistantPersonal)}
-                        className={`flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all duration-300 w-full cursor-pointer relative ${
-                          activeView === ActiveView.AssistantPersonal
-                            ? "bg-[#5DF7FF]/10 text-neural-cyan border border-neural-cyan/15"
-                            : "text-titanium/40 hover:text-white hover:bg-white/3"
-                        }`}
-                      >
-                        <User size={13} className={activeView === ActiveView.AssistantPersonal ? "text-neural-cyan" : "text-titanium/40"} />
-                        <span className="text-[11px] font-medium font-sans truncate select-none">
-                          {translations[language].personal}
-                        </span>
-                        {activeView === ActiveView.AssistantPersonal && (
-                          <span className="absolute right-2.5 w-1 h-1 bg-neural-cyan rounded-full shadow-[0_0_8px_rgba(93,247,255,0.8)]" />
-                        )}
-                      </button>
-
-                      {/* Projects Sub-item */}
-                      <button
-                        onClick={() => selectAssistantView(ActiveView.AssistantProjects)}
-                        className={`flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all duration-300 w-full cursor-pointer relative ${
-                          activeView === ActiveView.AssistantProjects
-                            ? "bg-[#5DF7FF]/10 text-neural-cyan border border-neural-cyan/15"
-                            : "text-titanium/40 hover:text-white hover:bg-white/3"
-                        }`}
-                      >
-                        <Briefcase size={13} className={activeView === ActiveView.AssistantProjects ? "text-neural-cyan" : "text-titanium/40"} />
-                        <span className="text-[11px] font-medium font-sans truncate select-none">
-                          {translations[language].projects}
-                        </span>
-                        {activeView === ActiveView.AssistantProjects && (
-                          <span className="absolute right-2.5 w-1 h-1 bg-neural-cyan rounded-full shadow-[0_0_8px_rgba(93,247,255,0.8)]" />
-                        )}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            }
-
             const active = activeView === item.view;
             return (
               <div key={item.view} className="flex flex-col gap-1 w-full">
@@ -390,7 +580,7 @@ export default function App() {
 
       {/* 1.5 Collapsible Recent & Projects Panel */}
       <AnimatePresence initial={false}>
-        {recentPanelOpen && activeView === ActiveView.AssistantPersonal && (
+        {recentPanelOpen && activeView === ActiveView.Chat && (
           <motion.div
             initial={{ width: 0, opacity: 0 }}
             animate={{ width: 256, opacity: 1 }}
@@ -401,7 +591,7 @@ export default function App() {
             {/* Header of recent panel */}
             <div className="p-4 border-b border-white/10 flex items-center justify-between">
               <span className="text-xs font-mono font-bold uppercase tracking-wider text-titanium/70">
-                {activeView === ActiveView.AssistantPersonal ? translations[language].personal : translations[language].projects}
+                {activeView === ActiveView.Chat ? translations[language].personal : translations[language].projects}
               </span>
               <button
                 onClick={() => setRecentPanelOpen(false)}
@@ -415,21 +605,27 @@ export default function App() {
             {/* New Chat Button */}
             <div className="p-3">
               <button
-                onClick={() => {
-                  const newId = String(Date.now());
-                  const newSub: Subject = {
-                    id: newId,
-                    name: language === "fa" ? "کانال گفتگوی جدید" : "New Neural Pipeline",
-                    date: "Just now",
-                    dateFa: "اکنون",
-                    status: "New",
-                    category: currentCategory,
-                    messages: []
-                  };
-                  setSubjects(prev => [newSub, ...prev]);
-                  setActiveSubjectId(newId);
-                  setActiveView(activeView);
-                  triggerNotification(language === "fa" ? "کانال گفتگوی عصبی راه‌اندازی شد" : "New neural pipeline initialized");
+                onClick={async () => {
+                  setBackendError(null);
+                  try {
+                    const session = await createSession();
+                    const newSub: Subject = {
+                      id: session.id,
+                      name: language === "fa" ? "کانال گفتگوی جدید" : "New Neural Pipeline",
+                      date: "Just now",
+                      dateFa: "اکنون",
+                      status: "New",
+                      category: currentCategory,
+                      messages: []
+                    };
+                    setSubjects(prev => [newSub, ...prev]);
+                    setActiveSubjectId(session.id);
+                    setSessionId(session.id);
+                    triggerNotification(language === "fa" ? "کانال گفتگوی عصبی راه‌اندازی شد" : "New neural pipeline initialized");
+                  } catch (err: any) {
+                    setBackendError(err.message || 'Failed to create session');
+                    triggerNotification(language === "fa" ? "ایجاد جلسه موفق نبود" : "Failed to create session");
+                  }
                 }}
                 className="w-full py-2 px-3.5 bg-neural-cyan/10 hover:bg-neural-cyan/20 border border-neural-cyan/25 rounded-xl text-xs font-semibold text-neural-cyan flex items-center justify-center gap-2 transition-all hover:scale-[1.02] cursor-pointer"
               >
@@ -447,6 +643,9 @@ export default function App() {
                     key={sub.id}
                     onClick={() => {
                       setActiveSubjectId(sub.id);
+                      if (isUuid(sub.id)) {
+                        setSessionId(sub.id);
+                      }
                       setActiveView(activeView);
                     }}
                     className={`group relative px-3 py-3 rounded-xl border transition-all duration-300 cursor-pointer ${
@@ -474,14 +673,7 @@ export default function App() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            const index = subjects.findIndex(s => s.id === sub.id);
-                            const updated = subjects.filter(s => s.id !== sub.id);
-                            setSubjects(updated);
-                            if (isActive) {
-                              const nextActive = updated[Math.min(index, updated.length - 1)];
-                              setActiveSubjectId(nextActive.id);
-                            }
-                            triggerNotification(language === "fa" ? "گفتگو حذف شد" : "Subject deleted");
+                            setDeleteTarget(sub);
                           }}
                           className="opacity-0 group-hover:opacity-100 text-titanium/30 hover:text-red-400 p-0.5 rounded transition-all cursor-pointer"
                           title="Delete thread"
@@ -519,64 +711,6 @@ export default function App() {
               {menuItems.map((item) => {
                 const Icon = item.icon;
                 const active = activeView === item.view;
-
-                if (item.isParent) {
-                  const isAssistantActive = activeView === ActiveView.AssistantPersonal || activeView === ActiveView.AssistantProjects;
-                  return (
-                    <div key={item.view} className="flex flex-col gap-2 w-full animate-fadeIn">
-                      <button
-                        onClick={() => {
-                          setAssistantDropdownOpen(!assistantDropdownOpen);
-                        }}
-                        className={`flex items-center justify-between p-4 rounded-xl text-sm font-semibold border ${
-                          isAssistantActive 
-                            ? "bg-neural-cyan/10 border-neural-cyan/30 text-neural-cyan font-bold" 
-                            : "bg-white/3 border-white/10 text-titanium/50"
-                        }`}
-                      >
-                        <div className="flex items-center gap-4 text-left">
-                          <Icon size={18} />
-                          <span>{translations[language].assistant}</span>
-                        </div>
-                        <ChevronDown size={14} className={`transition-transform ${assistantDropdownOpen ? "rotate-0" : "-rotate-90"}`} />
-                      </button>
-
-                      {assistantDropdownOpen && (
-                        <div className="flex gap-2 pl-4">
-                          <button
-                            onClick={() => {
-                              selectAssistantView(ActiveView.AssistantPersonal);
-                              setSidebarOpen(false);
-                            }}
-                            className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs border ${
-                              activeView === ActiveView.AssistantPersonal
-                                ? "bg-[#5DF7FF]/10 border-neural-cyan/30 text-neural-cyan font-bold"
-                                : "bg-white/3 border-white/5 text-titanium/50"
-                            }`}
-                          >
-                            <User size={14} />
-                            {translations[language].personal}
-                          </button>
-
-                          <button
-                            onClick={() => {
-                              selectAssistantView(ActiveView.AssistantProjects);
-                              setSidebarOpen(false);
-                            }}
-                            className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs border ${
-                              activeView === ActiveView.AssistantProjects
-                                ? "bg-[#5DF7FF]/10 border-neural-cyan/30 text-neural-cyan font-bold"
-                                : "bg-white/3 border-white/5 text-titanium/50"
-                            }`}
-                          >
-                            <Briefcase size={14} />
-                            {translations[language].projects}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                }
 
                 return (
                   <div key={item.view} className="flex flex-col gap-2 w-full">
@@ -621,7 +755,7 @@ export default function App() {
               <Menu size={20} />
             </button>
             
-            {!recentPanelOpen && activeView === ActiveView.AssistantPersonal && (
+            {!recentPanelOpen && activeView === ActiveView.Chat && (
               <button
                 onClick={() => setRecentPanelOpen(true)}
                 className="hidden md:flex items-center justify-center w-8 h-8 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-titanium/50 hover:text-white transition-all cursor-pointer"
@@ -714,8 +848,8 @@ export default function App() {
                 <DashboardSection
                   language={language}
                   onNavigate={(view) => {
-                    if (view === "AssistantPersonal") {
-                      selectAssistantView(ActiveView.AssistantPersonal);
+                    if (view === "Chat") {
+                      selectAssistantView(ActiveView.Chat);
                     } else {
                       setActiveView(view);
                     }
@@ -723,7 +857,10 @@ export default function App() {
                   onNavigateToProject={() => {}}
                   onNavigateToChat={(chatId) => {
                     setActiveSubjectId(chatId);
-                    selectAssistantView(ActiveView.AssistantPersonal);
+                    if (isUuid(chatId)) {
+                      setSessionId(chatId);
+                    }
+                    selectAssistantView(ActiveView.Chat);
                   }}
                   subjects={subjects}
                   projects={[]}
@@ -731,7 +868,7 @@ export default function App() {
                 />
               )}
 
-              {activeView === ActiveView.AssistantPersonal && (
+              {activeView === ActiveView.Chat && (
                 <HomeScreen
                   orbState={orbState}
                   setOrbState={setOrbState}
@@ -743,11 +880,13 @@ export default function App() {
                   interactionMode={interactionMode}
                   setInteractionMode={setInteractionMode}
                   messages={messages}
+                  activityLog={activityLog}
+                  isLoading={isLoading}
                 />
               )}
 
               {/* STEP 2+ FEATURES — COMMENTED OUT
-              {activeView === ActiveView.AssistantProjects && (
+              {activeView === ActiveView.Projects && (
                 <ProjectsSection
                   language={language}
                   projects={projects}
@@ -777,7 +916,7 @@ export default function App() {
                 <AutomationsSection
                   language={language}
                   onTriggerAutomation={(prompt) => {
-                    selectAssistantView(ActiveView.AssistantPersonal);
+                    selectAssistantView(ActiveView.Chat);
                     setMessages(prev => [
                       ...prev,
                       { id: `auto-${Date.now()}`, sender: "user", text: prompt, timestamp: new Date().toLocaleTimeString() }
@@ -810,11 +949,106 @@ export default function App() {
                 />
               )}
               */}
+
+              {activeView === ActiveView.Settings && (
+                <SettingsSection
+                  language={language}
+                  theme={theme}
+                  setTheme={setTheme}
+                />
+              )}
             </motion.div>
           </AnimatePresence>
         </div>
 
       </main>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {deleteTarget && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              className="w-full max-w-sm bg-[#0b0c10] border border-red-400/30 p-6 rounded-2xl shadow-[0_0_40px_rgba(239,68,68,0.15)] flex flex-col gap-4 relative"
+            >
+              <button
+                onClick={() => setDeleteTarget(null)}
+                className="absolute top-4 right-4 text-titanium/40 hover:text-white"
+              >
+                <X size={16} />
+              </button>
+
+              <div>
+                <h3 className="text-sm font-heading font-extrabold text-white flex items-center gap-2">
+                  <Trash2 size={16} className="text-red-400" />
+                  {language === "fa" ? "حذف گفتگو" : "Delete Conversation"}
+                </h3>
+                <p className="text-[11px] text-titanium/50 font-mono mt-1">
+                  {language === "fa"
+                    ? `آیا از حذف «${deleteTarget.name}» مطمئن هستید؟ این عمل قابل بازگشت نیست.`
+                    : `Are you sure you want to delete "${deleteTarget.name}"? This action cannot be undone.`}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 justify-end mt-2">
+                <button
+                  onClick={() => setDeleteTarget(null)}
+                  className="px-3.5 py-2 rounded-xl border border-white/5 bg-white/3 hover:bg-white/10 text-[11px] text-titanium hover:text-white transition-all cursor-pointer font-sans"
+                >
+                  {language === "fa" ? "انصراف" : "Cancel"}
+                </button>
+                <button
+                  onClick={async () => {
+                    const sub = deleteTarget;
+                    if (!sub) return;
+
+                    const index = subjects.findIndex(s => s.id === sub.id);
+                    const isActive = activeSubjectId === sub.id;
+
+                    try {
+                      // Delete from both CLI and backend DB
+                      const promises: Promise<void>[] = [];
+                      if (isUuid(sub.id)) {
+                        promises.push(deleteCliSession(sub.id));
+                        promises.push(deleteSession(sub.id));
+                      }
+                      await Promise.all(promises);
+
+                      const updated = subjects.filter(s => s.id !== sub.id);
+                      setSubjects(updated);
+                      if (isActive && updated.length > 0) {
+                        const nextActive = updated[Math.min(index, updated.length - 1)];
+                        setActiveSubjectId(nextActive.id);
+                        if (isUuid(nextActive.id)) {
+                          setSessionId(nextActive.id);
+                        } else {
+                          setSessionId(null);
+                        }
+                      }
+                      triggerNotification(language === "fa" ? "گفتگو حذف شد" : "Conversation deleted");
+                    } catch (err: any) {
+                      console.error('Failed to delete session:', err);
+                      triggerNotification(language === "fa" ? "خطا در حذف گفتگو" : "Failed to delete conversation");
+                    } finally {
+                      setDeleteTarget(null);
+                    }
+                  }}
+                  className="px-4 py-2 rounded-xl bg-red-500 text-white font-semibold text-[11px] hover:bg-red-600 transition-all cursor-pointer"
+                >
+                  {language === "fa" ? "حذف" : "Delete"}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -70,11 +70,16 @@ export interface TranslationSet {
   assistant: string;
   personal: string;
   projects: string;
+  chat: string;
   automations: string;
   integrations: string;
   settings: string;
   memory: string;
   home: string;
+  terminalTitle: string;
+  terminalEmpty: string;
+  terminalCommand: string;
+  terminalOutput: string;
 }
 
 export const translations: Record<"en" | "fa", TranslationSet> = {
@@ -101,12 +106,12 @@ export const translations: Record<"en" | "fa", TranslationSet> = {
     telemetrySandboxValue: "Active",
     neuroLinkTitle: "Neuro-Link Synthesis",
     neuroLinkDesc: "Continuous synaptic alignment is operating at 99.8%. Check compiled memory schemas.",
-    modeDirect: "Direct Action",
-    modeDirectDesc: "Fast compilation & single command execution",
-    modePlan: "Planning Mode",
-    modePlanDesc: "Generate multi-step milestones & roadmap",
-    modeAgent: "Neural Agent",
-    modeAgentDesc: "Deploy team of specialized collaborative agents",
+    modeDirect: "Quick Chat",
+    modeDirectDesc: "Fast single-turn conversation",
+    modePlan: "Deep Thinking",
+    modePlanDesc: "Step-by-step reasoning & planning",
+    modeAgent: "Multi-Agent",
+    modeAgentDesc: "Collaborative agent team deployment",
     restoreLabel: "Restore recent sessions",
     suggestDeepLearningTag: "Deep Learning",
     suggestDeepLearningTitle: "Synthesize Neural Network Architecture",
@@ -150,11 +155,16 @@ export const translations: Record<"en" | "fa", TranslationSet> = {
     assistant: "Assistant",
     personal: "Personal",
     projects: "Projects",
+    chat: "Chat",
     automations: "Automations",
     integrations: "Integrations",
     settings: "Settings",
     memory: "Memory",
-    home: "Home"
+    home: "Home",
+    terminalTitle: "Terminal",
+    terminalEmpty: "No commands executed yet",
+    terminalCommand: "Command",
+    terminalOutput: "Output"
   },
   fa: {
     systemVersion: "سیستم‌عامل میمو نسخه ۴.۰.۹ (نسخه پایدار)",
@@ -179,12 +189,12 @@ export const translations: Record<"en" | "fa", TranslationSet> = {
     telemetrySandboxValue: "فعال",
     neuroLinkTitle: "سنتز نورولینک عصبی",
     neuroLinkDesc: "هم‌راستایی مداوم سیناپسی در ۹۹.۸٪ فعال است. طرحواره‌های حافظه کامپایل‌شده را بررسی کنید.",
-    modeDirect: "اقدام مستقیم",
-    modeDirectDesc: "کامپایل سریع و اجرای دستورات تکی",
-    modePlan: "حالت برنامه‌ریزی",
-    modePlanDesc: "تولید گام‌به‌گام مایلستون‌ها و نقشه راه",
-    modeAgent: "عامل هوشمند عصبی",
-    modeAgentDesc: "استقرار تیمی از عامل‌های تخصصی همکار",
+    modeDirect: "گفتگوی سریع",
+    modeDirectDesc: "مکالمه تک‌مرحله‌ای سریع",
+    modePlan: "تفکر عمیق",
+    modePlanDesc: "استدلال و برنامه‌ریزی گام‌به‌گام",
+    modeAgent: "چندعاملی",
+    modeAgentDesc: "استقرار تیم همکار عامل‌ها",
     restoreLabel: "بازیابی نشست‌های اخیر",
     suggestDeepLearningTag: "یادگیری عمیق",
     suggestDeepLearningTitle: "سنتز معماری شبکه عصبی",
@@ -228,10 +238,15 @@ export const translations: Record<"en" | "fa", TranslationSet> = {
     assistant: "دستیار هوشمند",
     personal: "شخصی",
     projects: "پروژه‌ها",
+    chat: "گفتگو",
     automations: "اتوماسیون‌ها",
     integrations: "اتصال‌ها و ابزارها",
     settings: "تنظیمات",
     memory: "حافظه",
-    home: "خانه"
+    home: "خانه",
+    terminalTitle: "ترمینال",
+    terminalEmpty: "هنوز دستوری اجرا نشده",
+    terminalCommand: "دستور",
+    terminalOutput: "خروجی"
   }
 };

@@ -75,6 +75,12 @@ export const messageRepository = {
       content: m.content,
     }));
   },
+
+  /** Delete a message by id. Used for rollback when provider generation fails. */
+  deleteById(messageId: string): void {
+    const db = getDatabase();
+    db.prepare('DELETE FROM messages WHERE id = ?').run(messageId);
+  },
 };
 
 export default messageRepository;

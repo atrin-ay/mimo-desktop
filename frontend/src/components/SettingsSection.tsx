@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "motion/react";
 import { 
   Settings, 
@@ -148,6 +148,12 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
   const [defaultModel, setDefaultModel] = useState("Gemini 2.5 Flash");
   const [reasoningMode, setReasoningMode] = useState(true);
   const [responseStyle, setResponseStyle] = useState("concise");
+  const [mimoApiKey, setMimoApiKey] = useState('');
+  const [mimoBaseUrl, setMimoBaseUrl] = useState('https://api.siliconflow.cn/v1');
+  const [mimoModel, setMimoModel] = useState('Qwen/Qwen3-8B');
+  const [savingKey, setSavingKey] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [savedOk, setSavedOk] = useState(false);
   
   const [emailNotif, setEmailNotif] = useState(true);
   const [desktopNotif, setDesktopNotif] = useState(false);
@@ -155,6 +161,16 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
 
   const isRtl = language === "fa";
   const st = settingsTranslations[language];
+
+  useEffect(() => {
+    try {
+      setMimoApiKey(localStorage.getItem('mimo_api_key') ?? '');
+      setMimoBaseUrl(localStorage.getItem('mimo_base_url') ?? 'https://api.siliconflow.cn/v1');
+      setMimoModel(localStorage.getItem('mimo_model') ?? 'Qwen/Qwen3-8B');
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const [skills, setSkills] = useState([
     { 
@@ -367,6 +383,76 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
                       <option value="verbose">{st.responseStyleVerbose}</option>
                       <option value="code-first">{st.responseStyleCode}</option>
                     </select>
+                  </div>
+
+                  {/* MIMO API Key input */}
+                  <div className="space-y-3 py-2.5 border-b border-white/5">
+                    <div className="flex justify-between items-center">
+                      <div className="max-w-[70%]">
+                        <span className="text-xs font-semibold text-white/80 block">MiMo API Key</span>
+                        <span className="text-[10px] text-titanium/45">Your HuggingFace token (hf_...) or compatible API key</span>
+                      </div>
+                      <input
+                        value={mimoApiKey}
+                        onChange={(e) => setMimoApiKey(e.target.value)}
+                        placeholder="hf_..."
+                        className="bg-[#111] border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-neural-cyan/30 w-48"
+                      />
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <div className="max-w-[70%]">
+                        <span className="text-xs font-semibold text-white/80 block">API Base URL</span>
+                        <span className="text-[10px] text-titanium/45">OpenAI-compatible endpoint (HuggingFace, local vLLM, etc.)</span>
+                      </div>
+                      <input
+                        value={mimoBaseUrl}
+                        onChange={(e) => setMimoBaseUrl(e.target.value)}
+                        placeholder="https://api.siliconflow.cn/v1"
+                        className="bg-[#111] border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-neural-cyan/30 w-48"
+                      />
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <div className="max-w-[70%]">
+                        <span className="text-xs font-semibold text-white/80 block">Model ID</span>
+                        <span className="text-[10px] text-titanium/45">Model identifier for the inference endpoint</span>
+                      </div>
+                      <input
+                        value={mimoModel}
+                        onChange={(e) => setMimoModel(e.target.value)}
+                        placeholder="Qwen/Qwen3-8B"
+                        className="bg-[#111] border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-neural-cyan/30 w-48"
+                      />
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        onClick={async () => {
+                          setSaveError(null);
+                          setSavedOk(false);
+                          try {
+                            setSavingKey(true);
+                            localStorage.setItem('mimo_api_key', mimoApiKey);
+                            localStorage.setItem('mimo_base_url', mimoBaseUrl);
+                            localStorage.setItem('mimo_model', mimoModel);
+
+                            try {
+                              const { setApiKey } = await import('../api');
+                              await setApiKey(mimoApiKey, mimoBaseUrl, mimoModel);
+                              setSavedOk(true);
+                            } catch (err: any) {
+                              setSaveError(err?.message ?? 'Failed to persist to backend');
+                            }
+                          } finally {
+                            setSavingKey(false);
+                          }
+                        }}
+                        className="px-3 py-1.5 rounded-lg text-[10px] font-mono transition-all cursor-pointer bg-neural-cyan text-black"
+                      >
+                        {savingKey ? 'Saving...' : savedOk ? 'Saved' : 'Save'}
+                      </button>
+                    </div>
+                    {saveError && (
+                      <div className="text-[11px] text-rose-400">{saveError}</div>
+                    )}
                   </div>
 
                   {/* Configured Agents list */}

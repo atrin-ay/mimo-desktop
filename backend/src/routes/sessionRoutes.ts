@@ -3,6 +3,9 @@ import {
   createSession,
   getSession,
   deleteSession,
+  listCliSessions,
+  exportCliSession,
+  deleteCliSession,
 } from '../controllers/sessionController';
 import { validate } from '../middleware/validate';
 import { createSessionSchema, sessionIdParamSchema } from '../schemas';
@@ -18,5 +21,15 @@ const router = Router();
 router.post('/', validate(createSessionSchema), createSession);
 router.get('/:id', validate(sessionIdParamSchema), getSession);
 router.delete('/:id', validate(sessionIdParamSchema), deleteSession);
+
+/**
+ * CLI Session routes.
+ *   GET    /api/cli/sessions              - list sessions from MiMo CLI
+ *   GET    /api/cli/sessions/:id/export   - export a session from MiMo CLI
+ *   DELETE /api/cli/sessions/:id          - delete a session from MiMo CLI
+ */
+router.get('/cli/sessions', listCliSessions);
+router.get('/cli/sessions/:id/export', exportCliSession);
+router.delete('/cli/sessions/:id', deleteCliSession);
 
 export default router;

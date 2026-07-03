@@ -14,7 +14,7 @@ export interface AIProvider {
    * Send the conversation history to the provider and return the assistant's
    * reply.
    */
-  sendMessage(messages: ProviderMessage[]): Promise<ProviderResult>;
+  sendMessage(messages: ProviderMessage[], mode?: string): Promise<ProviderResult>;
 
   /** Check whether the provider is reachable / ready to serve requests. */
   healthCheck(): Promise<ProviderHealth>;

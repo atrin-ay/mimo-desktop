@@ -4,103 +4,142 @@ import type {
   ProviderMessage,
   ProviderResult,
 } from '../types';
-import { exec } from 'child_process';
+import { env } from '../config/env';
 import { logger } from '../config/logger';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
+import { URL } from 'node:url';
 
-/**
- * MiMo AI provider — calls the locally installed `mimo` CLI.
- */
+const SYSTEM_PROMPT = `You are MiMo, a helpful and accurate AI assistant. Keep answers concise and relevant. Always return valid JSON-safe text.`;
+
+function postJson(url: string, headers: Record<string, string>, body: unknown): Promise<{ status: number; bodyText: string; json: unknown }> {
+  const parsedUrl = new URL(url);
+  const requestFn = parsedUrl.protocol === 'https:' ? httpsRequest : httpRequest;
+  const payload = JSON.stringify(body);
+
+  return new Promise((resolve, reject) => {
+    const req = requestFn(
+      {
+        protocol: parsedUrl.protocol,
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? '443' : '80'),
+        path: `${parsedUrl.pathname}${parsedUrl.search}`,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+          ...headers,
+        },
+      },
+      (res) => {
+        let data = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+        res.on('end', () => {
+          try {
+            const json = JSON.parse(data || '{}');
+            resolve({ status: res.statusCode ?? 0, bodyText: data, json });
+          } catch (error) {
+            reject(new Error(`Failed to parse response JSON: ${error instanceof Error ? error.message : String(error)}`));
+          }
+        });
+      },
+    );
+
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
 export class MiMoProvider implements AIProvider {
   readonly name = 'mimo';
 
-  async sendMessage(messages: ProviderMessage[]): Promise<ProviderResult> {
+  async sendMessage(messages: ProviderMessage[], mode?: string): Promise<ProviderResult> {
     if (messages.length === 0) {
       throw new Error('MiMoProvider requires at least one message');
     }
 
-    const lastUserMessage = [...messages]
-      .reverse()
-      .find((m) => m.role === 'user');
-
-    const prompt = lastUserMessage?.content ?? '';
-
-    if (!prompt) {
-      throw new Error('No user message found in conversation');
+    const apiKey = env.mimoApiKey;
+    if (!apiKey) {
+      throw new Error('MIMO_API_KEY is not configured');
     }
 
-    logger.debug(
-      { messageCount: messages.length },
-      'MiMoProvider executing CLI',
-    );
+    const url = `${env.mimoBaseUrl.replace(/\/$/, '')}/chat/completions`;
+    const keyPrefix = apiKey.substring(0, 8) + '...';
 
-    const content = await this.runCli(prompt);
+    logger.info({ url, model: env.mimoModel, keyPrefix }, 'MiMoProvider connecting');
 
-    if (!content) {
-      throw new Error('MiMo CLI returned empty response');
+    const payload = {
+      model: env.mimoModel,
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        ...messages.map((message) => ({
+          role: message.role,
+          content: message.content,
+        })),
+      ],
+      temperature: 0.7,
+      max_tokens: 2048,
+    } as const;
+
+    logger.debug({ messageCount: messages.length, mode, model: env.mimoModel }, 'MiMoProvider sending request');
+
+    let response;
+    try {
+      response = await postJson(url, {
+        Authorization: `Bearer ${apiKey}`,
+      }, payload);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      logger.error({ detail, url }, 'MiMoProvider connection failed');
+      throw new Error(`Cannot reach AI provider at ${url}: ${detail}`);
     }
 
-    logger.info({ messageCount: messages.length }, 'MiMoProvider response received');
+    if (response.status < 200 || response.status >= 300) {
+      logger.error({ status: response.status, bodyText: response.bodyText }, 'MiMoProvider API error');
+      throw new Error(`AI provider returned HTTP ${response.status}: ${response.bodyText}`);
+    }
+
+    const data = response.json as Record<string, unknown>;
+    const choices = Array.isArray(data.choices) ? data.choices as Array<unknown> : undefined;
+    const firstChoice = choices?.[0];
+    const message =
+      firstChoice && typeof firstChoice === 'object' && firstChoice !== null
+        ? (firstChoice as Record<string, unknown>).message
+        : undefined;
+    const content = message && typeof message === 'object' && message !== null
+      ? (message as Record<string, unknown>).content
+      : undefined;
+
+    if (!content || typeof content !== 'string') {
+      throw new Error('MiMo API returned empty response');
+    }
+
+    logger.info({ model: env.mimoModel, provider: this.name }, 'MiMoProvider response received');
 
     return {
       content,
       metadata: {
         provider: this.name,
-        messageCount: messages.length,
+        model: env.mimoModel,
+        usage: (data.usage as Record<string, unknown>) ?? undefined,
       },
     };
   }
 
   async healthCheck(): Promise<ProviderHealth> {
-    return new Promise((resolve) => {
-      exec('mimo --version', { timeout: 5000 }, (err, stdout) => {
-        resolve({
-          healthy: !err,
-          provider: this.name,
-          details: {
-            version: err ? undefined : stdout.trim(),
-          },
-        });
-      });
-    });
-  }
-
-  private runCli(prompt: string): Promise<string> {
-    const escaped = prompt.replace(/"/g, '\\"').replace(/\n/g, ' ');
-    const cmd = `echo "${escaped}" | mimo run --dangerously-skip-permissions --format json`;
-
-    return new Promise((resolve, reject) => {
-      exec(
-        cmd,
-        { timeout: 120_000, maxBuffer: 10 * 1024 * 1024 },
-        (err, stdout, stderr) => {
-          if (err) {
-            logger.error({ err, stderr }, 'MiMo CLI execution failed');
-            reject(new Error(`MiMo CLI error: ${err.message}`));
-            return;
-          }
-
-          const text = this.parseJsonOutput(stdout);
-          resolve(text);
-        },
-      );
-    });
-  }
-
-  private parseJsonOutput(stdout: string): string {
-    const lines = stdout.split('\n').filter(Boolean);
-    const textParts: string[] = [];
-
-    for (const line of lines) {
-      try {
-        const event = JSON.parse(line);
-        if (event.type === 'text' && event.part?.text) {
-          textParts.push(event.part.text);
-        }
-      } catch {
-        // non-JSON line, skip
-      }
-    }
-
-    return textParts.join('\n').trim();
+    const healthy = Boolean(env.mimoApiKey);
+    return {
+      healthy,
+      provider: this.name,
+      details: {
+        baseUrl: env.mimoBaseUrl,
+        model: env.mimoModel,
+        apiKeyConfigured: healthy,
+      },
+    };
   }
 }

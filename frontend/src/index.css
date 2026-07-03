@@ -31,6 +31,11 @@
   --titanium: #475569;
 }
 
+.font-fa,
+.font-fa * {
+  font-family: "Vazirmatn", "Inter", sans-serif !important;
+}
+
 /* Custom global luxury scrollbars and utilities */
 @layer base {
   body {

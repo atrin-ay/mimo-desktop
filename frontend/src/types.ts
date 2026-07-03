@@ -17,8 +17,8 @@ export enum InteractionMode {
 
 export enum ActiveView {
   Home = "Home",
-  AssistantPersonal = "AssistantPersonal",
-  AssistantProjects = "AssistantProjects",
+  Chat = "Chat",
+  Projects = "Projects",
   Workspace = "Workspace",
   Automations = "Automations",
   Memory = "Memory",
@@ -96,5 +96,64 @@ export interface Subject {
   status: string;
   messages: Message[];
   category?: "personal" | "projects";
+}
+
+export interface ActivityEntry {
+  id: string;
+  type: 'reasoning' | 'tool' | 'step' | 'text';
+  toolName?: string;
+  label: string;
+  detail: string;
+  icon: string;
+  iconColor: string;
+  timestamp: number;
+  status: 'running' | 'completed' | 'error';
+}
+
+export interface CliSession {
+  id: string;
+  title: string;
+  updatedAt: number;
+}
+
+export interface ExportedSession {
+  info: {
+    id: string;
+    title: string;
+    projectID: string;
+    directory: string;
+    time: { created: number; updated: number };
+  };
+  messages: ExportedMessage[];
+}
+
+export interface ExportedMessage {
+  info: {
+    id: string;
+    sessionID: string;
+    role: 'user' | 'assistant' | 'system';
+    agent?: string;
+    model?: { providerID: string; modelID: string };
+    time?: { created: number; completed?: number };
+    tokens?: { total: number; input: number; output: number; reasoning: number };
+    cost?: number;
+    mode?: string;
+    parentID?: string;
+    finish?: string;
+  };
+  parts: ExportedPart[];
+}
+
+export interface ExportedPart {
+  type: string;
+  id?: string;
+  text?: string;
+  tool?: string;
+  callID?: string;
+  state?: { status: string; input?: Record<string, unknown>; output?: string };
+  time?: { start: number; end: number };
+  tokens?: { total: number; input: number; output: number; reasoning: number };
+  cost?: number;
+  reason?: string;
 }
 

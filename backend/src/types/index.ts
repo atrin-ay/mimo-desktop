@@ -64,6 +64,7 @@ export interface CreateSessionRequest {
 export interface ChatRequest {
   sessionId: string;
   message: string;
+  mode?: 'direct' | 'plan' | 'agent';
 }
 
 /** Response body for the chat endpoint. */

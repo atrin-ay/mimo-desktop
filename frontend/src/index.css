@@ -611,11 +611,11 @@
   border-color: rgba(15, 23, 42, 0.1) !important;
 }
 
-/* Ensure code outputs and terminals are beautifully visible (Deep forest green and charcoal instead of unreadable neon green) */
+/* Ensure code outputs and terminals are beautifully visible */
 .light .text-emerald-400,
 .light .text-emerald-400\/90,
 .light .text-emerald-500 {
-  color: #115e59 !important; /* Rich, professional dark forest teal-green */
+  color: #115e59 !important;
 }
 
 /* Glow effects matching light background */
@@ -624,6 +624,44 @@
 }
 .light .absolute[class*="bg-[#5DF7FF]"] {
   background-color: rgba(2, 132, 199, 0.08) !important;
+}
+
+/* ============================================
+   Chat Execution Card & Component Overrides
+   ============================================ */
+
+/* Execution card text container */
+.light .bg-white\/\[0\.03\] {
+  background-color: rgba(15, 23, 42, 0.03) !important;
+}
+
+/* Artifact card hover */
+.light .hover\:bg-white\/\[0\.05\]:hover {
+  background-color: rgba(15, 23, 42, 0.05) !important;
+}
+
+.light .hover\:border-white\/12:hover {
+  border-color: rgba(15, 23, 42, 0.12) !important;
+}
+
+/* Timeline step hover */
+.light .hover\:bg-white\/\[0\.02\]:hover {
+  background-color: rgba(15, 23, 42, 0.02) !important;
+}
+
+/* Chat input focus glow in light mode */
+.light .focus-within\:border-neural-cyan\/40:focus-within {
+  border-color: rgba(3, 105, 161, 0.4) !important;
+  box-shadow: 0 0 40px rgba(3, 105, 161, 0.06) !important;
+}
+
+/* Reasoning section in light mode */
+.light .bg-purple-400\/\[0\.04\] {
+  background-color: rgba(147, 51, 234, 0.04) !important;
+}
+
+.light .border-purple-400\/10 {
+  border-color: rgba(147, 51, 234, 0.1) !important;
 }
 
 

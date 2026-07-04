@@ -6,7 +6,9 @@ export enum OrbState {
   Executing = "Executing",
   Collaborating = "Collaborating",
   Learning = "Learning",
-  Completed = "Completed"
+  Completed = "Completed",
+  Error = "Error",
+  Streaming = "Streaming",
 }
 
 export enum InteractionMode {
@@ -34,6 +36,21 @@ export interface Message {
   timestamp: string;
   status?: "pending" | "streaming" | "done";
   tokensPerSec?: number;
+  events: ActivityEntry[];
+  artifacts: Artifact[];
+  reasoning?: string;
+  mode?: string;
+  isQuestion?: boolean;
+  questionOptions?: string[];
+}
+
+export interface Artifact {
+  id: string;
+  type: "file" | "code" | "image";
+  name: string;
+  path?: string;
+  content?: string;
+  language?: string;
 }
 
 export interface FileItem {

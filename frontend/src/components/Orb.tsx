@@ -153,6 +153,28 @@ export default function Orb({ state, size = 320, onClick }: OrbProps) {
             drawWeb: false,
             pulseFreq: 0.04,
           };
+        case OrbState.Error:
+          return {
+            color1: "rgba(239, 68, 68, 0.95)", // Red error
+            color2: "rgba(185, 188, 194, 0.3)",
+            speed: 4.0,
+            jitter: 10,
+            gravity: 0.1,
+            orbitRadius: size * 0.3,
+            drawWeb: false,
+            pulseFreq: 0.5,
+          };
+        case OrbState.Streaming:
+          return {
+            color1: "rgba(93, 247, 255, 0.95)", // Neural cyan streaming
+            color2: "rgba(74, 141, 255, 0.4)",
+            speed: 2.0,
+            jitter: 4,
+            gravity: 0,
+            orbitRadius: size * 0.34,
+            drawWeb: true,
+            pulseFreq: 0.15,
+          };
         case OrbState.Idle:
         default:
           return {
@@ -417,6 +439,8 @@ export default function Orb({ state, size = 320, onClick }: OrbProps) {
             state === OrbState.Collaborating ? "radial-gradient(circle, rgba(185,188,194,0.25) 0%, rgba(74,141,255,0.05) 70%)" :
             state === OrbState.Learning ? "radial-gradient(circle, rgba(168,85,247,0.3) 0%, rgba(93,247,255,0.05) 70%)" :
             state === OrbState.Completed ? "radial-gradient(circle, rgba(34,197,94,0.3) 0%, rgba(185,188,194,0.05) 70%)" :
+            state === OrbState.Error ? "radial-gradient(circle, rgba(239,68,68,0.3) 0%, rgba(185,188,194,0.05) 70%)" :
+            state === OrbState.Streaming ? "radial-gradient(circle, rgba(93,247,255,0.3) 0%, rgba(74,141,255,0.05) 70%)" :
             "radial-gradient(circle, rgba(93,247,255,0.2) 0%, rgba(74,141,255,0) 70%)"
         }}
       />
@@ -458,7 +482,9 @@ export default function Orb({ state, size = 320, onClick }: OrbProps) {
                 state === OrbState.Executing ? "#FF5D5D" :
                 state === OrbState.Collaborating ? "#B9BCC2" :
                 state === OrbState.Learning ? "#A855F7" :
-                state === OrbState.Completed ? "#22C55E" : "#5DF7FF"
+                state === OrbState.Completed ? "#22C55E" :
+                state === OrbState.Error ? "#EF4444" :
+                state === OrbState.Streaming ? "#5DF7FF" : "#5DF7FF"
             }}
           />
           {state}

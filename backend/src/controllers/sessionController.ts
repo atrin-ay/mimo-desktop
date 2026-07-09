@@ -19,6 +19,20 @@ export function createSession(
   }
 }
 
+/** GET /api/session — list all sessions with metadata. */
+export function listSessions(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  try {
+    const sessions = sessionService.listSessions();
+    res.status(200).json({ data: sessions });
+  } catch (err) {
+    next(err);
+  }
+}
+
 /** GET /api/session/:id — get a session with its messages. */
 export function getSession(
   req: Request,
@@ -109,4 +123,4 @@ export async function deleteCliSession(
   }
 }
 
-export default { createSession, getSession, deleteSession, listCliSessions, exportCliSession, deleteCliSession };
+export default { createSession, listSessions, getSession, deleteSession, listCliSessions, exportCliSession, deleteCliSession };

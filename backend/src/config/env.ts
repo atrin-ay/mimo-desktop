@@ -26,6 +26,12 @@ export interface EnvConfig {
   mimoApiKey: string;
   mimoBaseUrl: string;
   mimoModel: string;
+  // Context Manager config
+  contextManagerEnabled: boolean;
+  memoryProvider: string;
+  memoryModel: string;
+  memoryDebounceMs: number;
+  memoryWindowSize: number;
 }
 
 function loadEnv(): EnvConfig {
@@ -38,6 +44,12 @@ function loadEnv(): EnvConfig {
   const mimoApiKey = process.env.MIMO_API_KEY ?? '';
   const mimoBaseUrl = process.env.MIMO_BASE_URL ?? 'https://api.siliconflow.cn/v1';
   const mimoModel = process.env.MIMO_MODEL ?? 'Qwen/Qwen3-8B';
+  // Context Manager config
+  const contextManagerEnabled = process.env.CONTEXT_MANAGER_ENABLED !== 'false';
+  const memoryProvider = process.env.MEMORY_PROVIDER ?? 'chat-adapter';
+  const memoryModel = process.env.MEMORY_MODEL ?? '';
+  const memoryDebounceMs = parseInt(process.env.MEMORY_DEBOUNCE_MS ?? '8000', 10);
+  const memoryWindowSize = parseInt(process.env.MEMORY_WINDOW_SIZE ?? '12', 10);
 
   return {
     port,
@@ -49,6 +61,11 @@ function loadEnv(): EnvConfig {
     mimoApiKey,
     mimoBaseUrl,
     mimoModel,
+    contextManagerEnabled,
+    memoryProvider,
+    memoryModel,
+    memoryDebounceMs,
+    memoryWindowSize,
   };
 }
 

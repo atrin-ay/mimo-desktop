@@ -6,17 +6,13 @@ import {
   Message,
   ActivityEntry,
   Artifact,
-  ExportedSession,
-  ExportedMessage,
 } from "../types";
 import {
   createSession,
   getSession,
   sendMessage,
-  listCliSessions,
-  exportCliSession,
+  listSessions,
   streamChat,
-  deleteCliSession,
   deleteSession,
 } from "../api";
 
@@ -179,64 +175,52 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
     };
   }, [sessionId, language]);
 
-  // --- Load CLI sessions on mount ---
+  // --- Load sessions from backend on mount ---
+  // The backend SQLite DB is the source of truth for conversations (this is
+  // where messages are persisted, loaded, and deleted). We list sessions from
+  // it so the sidebar IDs are the same UUIDs that switch/delete/load operate
+  // on. Messages are loaded lazily per-session by the effect above when a
+  // session becomes active.
   useEffect(() => {
-    const loadCliSessions = async () => {
+    const loadSessions = async () => {
       try {
-        const cliSessions = await listCliSessions();
-        if (cliSessions.length === 0) return;
+        const sessions = await listSessions();
+        // Only surface sessions that actually contain messages; empty ones are
+        // throwaway sessions created before a message was ever sent.
+        const withMessages = sessions.filter((s) => s.messageCount > 0);
+        if (withMessages.length === 0) return;
 
-        const converted: Subject[] = cliSessions.map((s) => ({
-          id: s.id,
-          name: s.title || "New Session",
-          date: new Date(s.updatedAt).toLocaleTimeString(
-            language === "fa" ? "fa-IR" : "en-US",
-            { hour: "2-digit", minute: "2-digit" }
-          ),
-          dateFa: new Date(s.updatedAt).toLocaleTimeString("fa-IR", {
-            hour: "2-digit",
-            minute: "2-digit",
-          }),
-          status: "Active",
-          messages: [],
-          category: "personal" as const,
-        }));
-
-        const latestSession = cliSessions[0];
-        try {
-          const exported: ExportedSession = await exportCliSession(latestSession.id);
-          if (exported?.messages) {
-            const restoredMessages: Message[] = exported.messages
-              .filter((m: ExportedMessage) => m.info && m.parts)
-              .map((m: ExportedMessage) => ({
-                id: m.info.id,
-                sender: m.info.role === "user" ? ("user" as const) : ("agent" as const),
-                text: m.parts
-                  .filter((p: any) => p.type === "text")
-                  .map((p: any) => p.text || "")
-                  .join(""),
-                timestamp: new Date(m.info.time?.created || Date.now()).toLocaleTimeString(
-                  language === "fa" ? "fa-IR" : "en-US",
-                  { hour: "2-digit", minute: "2-digit" }
-                ),
-                events: [],
-                artifacts: [],
-              }))
-              .filter((m: Message) => m.text);
-
-            converted[0].messages = restoredMessages;
-          }
-        } catch {
-          // Could not export session
-        }
+        const converted: Subject[] = withMessages.map((s) => {
+          const title = (s.title || "").trim();
+          const name = title
+            ? title.slice(0, 45) + (title.length > 45 ? "..." : "")
+            : language === "fa"
+            ? "گفتگوی جدید"
+            : "New Conversation";
+          return {
+            id: s.id,
+            name,
+            date: new Date(s.lastActivityAt).toLocaleTimeString(
+              language === "fa" ? "fa-IR" : "en-US",
+              { hour: "2-digit", minute: "2-digit" }
+            ),
+            dateFa: new Date(s.lastActivityAt).toLocaleTimeString("fa-IR", {
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
+            status: "Active",
+            category: "personal" as const,
+            messages: [],
+          };
+        });
 
         setSubjects(converted);
         setActiveSubjectId(converted[0].id);
       } catch {
-        // Could not load CLI sessions
+        // Could not load sessions — keep the default empty conversation.
       }
     };
-    loadCliSessions();
+    loadSessions();
   }, [language]);
 
   // --- Execute command / send message ---
@@ -750,12 +734,12 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
       const isActive = activeSubjectId === sub.id;
 
       try {
-        const promises: Promise<void>[] = [];
+        // Persist the deletion in the backend DB (the source of truth) so it
+        // does not reappear on refresh. Non-UUID subjects are local-only and
+        // just need to be dropped from state.
         if (isUuid(sub.id)) {
-          promises.push(deleteCliSession(sub.id));
-          promises.push(deleteSession(sub.id));
+          await deleteSession(sub.id);
         }
-        await Promise.all(promises);
 
         const updated = subjects.filter((s) => s.id !== sub.id);
         setSubjects(updated);
@@ -770,9 +754,10 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
         }
       } catch (err: any) {
         console.error("Failed to delete session:", err);
+        setBackendError(err.message || "Failed to delete session");
       }
     },
-    [subjects, activeSubjectId, setSubjects, setSessionId]
+    [subjects, activeSubjectId, setSubjects, setSessionId, setBackendError]
   );
 
   // --- Switch subject ---

@@ -4,6 +4,7 @@ import { sessionRepository } from '../storage/sessionRepository';
 import { messageRepository } from '../storage/messageRepository';
 import { getProvider } from '../providers';
 import { getDatabase } from '../storage/database';
+import { contextManager } from '../context/ContextManager';
 import { logger } from '../config/logger';
 import type { ApiResponse, ChatResponse, Message, ProviderMessage } from '../types';
 
@@ -49,6 +50,12 @@ export async function streamMessage(
       return;
     }
 
+    // Ensure session is assigned to a project (auto-assign if needed)
+    const projectId = contextManager.ensureProjectForSession(sessionId);
+
+    // Build context injection from brain (if available)
+    const contextInjection = contextManager.buildInjection(projectId);
+
     // Set up SSE
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -59,10 +66,12 @@ export async function streamMessage(
     // Send initial event
     res.write(`data: ${JSON.stringify({ type: 'start', timestamp: Date.now() })}\n\n`);
 
-    // Build conversation history
+    // Build conversation history (trim first, then prepend context injection)
     const history = messageRepository.findHistoryBySessionId(sessionId);
+    const trimmedHistory = history.slice(-40);
     const requestHistory: ProviderMessage[] = [
-      ...history,
+      ...(contextInjection ? [contextInjection] : []),
+      ...trimmedHistory,
       { role: 'user', content: userContent },
     ];
 
@@ -74,10 +83,34 @@ export async function streamMessage(
 
     if (typeof provider.sendMessageStream === 'function') {
       // Use streaming provider
+      let assistantText = '';
       try {
         await provider.sendMessageStream(requestHistory, mode, (event: any) => {
+          // Accumulate the assistant reply as it streams so we can persist it
+          // once the stream ends — mirroring how the frontend builds the
+          // visible message (text parts, plus any raw passthrough output).
+          if (event?.type === 'text' && event.part?.text) {
+            assistantText += event.part.text;
+          } else if (event?.type === 'raw' && typeof event.text === 'string') {
+            assistantText += event.text;
+          }
           res.write(`data: ${JSON.stringify(event)}\n\n`);
         });
+
+        // Persist the assistant reply so it survives a page reload. Without
+        // this, only user messages were stored and history looked one-sided.
+        if (assistantText.trim()) {
+          const assistantMsg = messageRepository.create({
+            sessionId,
+            role: 'assistant',
+            content: assistantText,
+          });
+
+          // Fire-and-forget memory update
+          contextManager.afterExchange(projectId, sessionId, userContent, assistantText);
+
+          res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMsg.id, timestamp: Date.now() })}\n\n`);
+        }
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         logger.error({ err, sessionId }, 'Streaming provider error');
@@ -98,6 +131,9 @@ export async function streamMessage(
         const assistantMsg = db.transaction(() => {
           return messageRepository.create({ sessionId, role: 'assistant', content: result.content });
         })();
+
+        // Fire-and-forget memory update
+        contextManager.afterExchange(projectId, sessionId, userContent, result.content);
 
         // Emit completion
         res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMsg.id, timestamp: Date.now() })}\n\n`);

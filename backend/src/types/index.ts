@@ -78,3 +78,12 @@ export interface SessionWithMessages {
   session: Session;
   messages: Message[];
 }
+
+/** A project that groups sessions. */
+export interface Project {
+  id: string;
+  name: string;
+  status: 'active' | 'archived';
+  createdAt: string;
+  updatedAt: string;
+}

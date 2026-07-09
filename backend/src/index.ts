@@ -1,11 +1,13 @@
 import express from 'express';
 import cors from 'cors';
-import pinoHttp from 'pino-http';
 import { env } from './config/env';
 import { logger } from './config/logger';
 import sessionRoutes from './routes/sessionRoutes';
 import chatRoutes from './routes/chatRoutes';
 import adminRoutes from './routes/adminRoutes';
+import projectRoutes from './routes/projectRoutes';
+import contextRoutes from './routes/contextRoutes';
+import mimoRoutes from './routes/mimoRoutes';
 import { initSchema } from './storage/database';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
@@ -15,11 +17,15 @@ const app = express();
 
 app.use(express.json());
 app.use(cors({ origin: env.corsOrigins }));
+// Disable ETags so API responses are never cached as 304
+app.set('etag', false);
 app.use(requestLogger);
-app.use(pinoHttp({ logger } as any));
 
 app.use('/api/session', sessionRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/project', projectRoutes);
+app.use('/api/context', contextRoutes);
+app.use('/api/mimo', mimoRoutes);
 if (env.nodeEnv !== 'production') {
   app.use('/api/admin', adminRoutes);
 } else {

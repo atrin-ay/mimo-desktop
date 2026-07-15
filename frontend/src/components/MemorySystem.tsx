@@ -1,355 +1,524 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { 
-  Database, 
-  GitFork, 
-  Cpu, 
-  Activity, 
-  CheckCircle, 
-  Clock, 
-  TrendingUp, 
-  Calendar,
-  Layers,
-  Sparkles,
-  Workflow,
-  Search,
-  BookOpen
+import {
+  Database,
+  GitFork,
+  CheckCircle,
+  Clock,
+  AlertTriangle,
+  RefreshCw,
+  Eye,
+  EyeOff,
+  ChevronDown,
+  ChevronRight,
+  Lightbulb,
+  Target,
+  FileCode,
+  GitBranch,
 } from "lucide-react";
+import {
+  getBrain,
+  getSuggestions,
+  approveSuggestion,
+  ignoreSuggestion,
+  type ProjectBrain,
+  type Suggestion,
+} from "../api";
 
-interface Node {
-  id: string;
-  label: string;
-  x: number;
-  y: number;
-  size: number;
-  category: "fact" | "skill" | "agent" | "session";
-  details: string;
-  timestamp: string;
+interface MemorySystemProps {
+  projectId?: string;
 }
 
-export default function MemorySystem() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [selectedNode, setSelectedNode] = useState<Node | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const mouseRef = useRef({ x: 0, y: 0 });
-
-  const initialNodes: Node[] = [
-    { id: "1", label: "Smart Contract Vulnerability Matrix", x: 180, y: 150, size: 8, category: "fact", details: "Identified standard ERC-20 staking overflow vulnerabilities on Solidity compilers prior to 0.8.20. Created automatic mitigation structures.", timestamp: "12 mins ago" },
-    { id: "2", label: "Low Latency C++ Ring Buffer", x: 380, y: 120, size: 9, category: "skill", details: "Generated atomic ring buffer bound to core CPU cache L3. Optimized read/write pointer latency to < 1.8ns.", timestamp: "2 hours ago" },
-    { id: "3", label: "Solana Token Economics", x: 250, y: 320, size: 7, category: "fact", details: "Synthesized deflationary vesting curves matching modern liquid staking wrappers. Simulated run rate validation against market depth of $5M.", timestamp: "1 day ago" },
-    { id: "4", label: "Agent Coordination Consensus Protocol", x: 550, y: 220, size: 10, category: "agent", details: "Established secure multi-agent communication protocol based on isolated TLS Handshakes and cryptographically signed command strings.", timestamp: "3 days ago" },
-    { id: "5", label: "Project Aurora Telemetry Sandbox", x: 620, y: 340, size: 8, category: "session", details: "Constructed isolated Docker containers running compiled WebAssembly tasks. Enabled strict memory sandboxing.", timestamp: "Yesterday" },
-    { id: "6", label: "WASM Multi-threading bindings", x: 110, y: 280, size: 6, category: "skill", details: "Distilled multi-threaded WebAssembly parallel structures with shared array buffers.", timestamp: "4 days ago" }
-  ];
-
-  const [nodes, setNodes] = useState<Node[]>(initialNodes);
+export default function MemorySystem({ projectId }: MemorySystemProps) {
+  const [brain, setBrain] = useState<ProjectBrain | null>(null);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(
+    new Set(["state", "knowledge"])
+  );
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (!projectId) {
+      setLoading(false);
+      return;
+    }
 
-    let animationId: number;
-    let width = canvas.parentElement?.clientWidth || 750;
-    let height = 450;
-    canvas.width = width;
-    canvas.height = height;
+    loadData();
+  }, [projectId]);
 
-    let time = 0;
+  const loadData = async () => {
+    if (!projectId) return;
 
-    const render = () => {
-      const isLight = document.querySelector(".light") !== null;
-      ctx.clearRect(0, 0, width, height);
-      time += 0.005;
+    setLoading(true);
+    setError(null);
 
-      // Draw subtle tech backdrop grids
-      ctx.strokeStyle = isLight ? "rgba(15, 23, 42, 0.04)" : "rgba(255, 255, 255, 0.015)";
-      ctx.lineWidth = 1;
-      const gridSize = 40;
-      for (let x = 0; x < width; x += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, height);
-        ctx.stroke();
+    try {
+      const [brainData, suggestionsData] = await Promise.all([
+        getBrain(projectId),
+        getSuggestions(projectId, "pending"),
+      ]);
+
+      setBrain(brainData);
+      setSuggestions(suggestionsData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load brain data");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApprove = async (suggestionId: string) => {
+    try {
+      await approveSuggestion(suggestionId);
+      setSuggestions((prev) => prev.filter((s) => s.id !== suggestionId));
+      // Reload brain to reflect changes
+      if (projectId) {
+        const updatedBrain = await getBrain(projectId);
+        setBrain(updatedBrain);
       }
-      for (let y = 0; y < height; y += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(width, y);
-        ctx.stroke();
+    } catch (err) {
+      console.error("Failed to approve suggestion:", err);
+    }
+  };
+
+  const handleIgnore = async (suggestionId: string) => {
+    try {
+      await ignoreSuggestion(suggestionId);
+      setSuggestions((prev) => prev.filter((s) => s.id !== suggestionId));
+    } catch (err) {
+      console.error("Failed to ignore suggestion:", err);
+    }
+  };
+
+  const toggleSection = (section: string) => {
+    setExpandedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(section)) {
+        next.delete(section);
+      } else {
+        next.add(section);
       }
+      return next;
+    });
+  };
 
-      // Draw glowing background network arcs
-      ctx.strokeStyle = isLight ? "rgba(2, 132, 199, 0.08)" : "rgba(93, 247, 255, 0.035)";
-      ctx.lineWidth = 0.8;
-      ctx.beginPath();
-      ctx.arc(width / 2, height / 2, 160 + Math.sin(time) * 10, 0, Math.PI * 2);
-      ctx.stroke();
+  if (!projectId) {
+    return (
+      <div className="w-full max-w-7xl mx-auto px-4 py-6 md:px-8 select-none">
+        <div className="flex items-center gap-2 text-titanium/50">
+          <Database size={16} />
+          <span className="text-sm font-mono">No project selected</span>
+        </div>
+      </div>
+    );
+  }
 
-      // Draw connections between nodes
-      ctx.strokeStyle = isLight ? "rgba(2, 132, 199, 0.2)" : "rgba(93, 247, 255, 0.09)";
-      ctx.lineWidth = 1;
-      for (let i = 0; i < nodes.length; i++) {
-        for (let j = i + 1; j < nodes.length; j++) {
-          const n1 = nodes[i];
-          const n2 = nodes[j];
+  if (loading) {
+    return (
+      <div className="w-full max-w-7xl mx-auto px-4 py-6 md:px-8 select-none">
+        <div className="flex items-center gap-2 text-titanium/50">
+          <RefreshCw size={16} className="animate-spin" />
+          <span className="text-sm font-mono">Loading brain data...</span>
+        </div>
+      </div>
+    );
+  }
 
-          // Connect nodes that are closer or have conceptual links
-          const dist = Math.sqrt(Math.pow(n1.x - n2.x, 2) + Math.pow(n1.y - n2.y, 2));
-          if (dist < 260) {
-            ctx.beginPath();
-            ctx.moveTo(n1.x, n1.y);
-            ctx.lineTo(n2.x, n2.y);
-            ctx.stroke();
+  if (error) {
+    return (
+      <div className="w-full max-w-7xl mx-auto px-4 py-6 md:px-8 select-none">
+        <div className="flex items-center gap-2 text-red-400">
+          <AlertTriangle size={16} />
+          <span className="text-sm font-mono">{error}</span>
+        </div>
+      </div>
+    );
+  }
 
-            // Draw glowing travel dot along connection representing data flow
-            const progress = (time * 1.5 + (i * 0.2)) % 1;
-            const travelX = n1.x + (n2.x - n1.x) * progress;
-            const travelY = n1.y + (n2.y - n1.y) * progress;
-            
-            ctx.fillStyle = isLight ? "rgba(2, 132, 199, 0.9)" : "rgba(93, 247, 255, 0.8)";
-            ctx.beginPath();
-            ctx.arc(travelX, travelY, 2, 0, Math.PI * 2);
-            ctx.fill();
-          }
-        }
-      }
+  if (!brain) {
+    return (
+      <div className="w-full max-w-7xl mx-auto px-4 py-6 md:px-8 select-none">
+        <div className="flex items-center gap-2 text-titanium/50">
+          <Database size={16} />
+          <span className="text-sm font-mono">No brain data yet — start chatting to build context</span>
+        </div>
+      </div>
+    );
+  }
 
-      // Draw Nodes
-      nodes.forEach((node) => {
-        const selected = selectedNode?.id === node.id;
-        const hoverDist = Math.sqrt(Math.pow(node.x - mouseRef.current.x, 2) + Math.pow(node.y - mouseRef.current.y, 2));
-        const isHovered = hoverDist < node.size + 8;
-
-        // Pulsing outer orbit glow
-        const glow = Math.sin(time * 5 + parseInt(node.id)) * 3 + 8;
-        ctx.fillStyle = 
-          node.category === "fact" ? (isLight ? "rgba(2, 132, 199, 0.12)" : "rgba(93, 247, 255, 0.1)") :
-          node.category === "skill" ? "rgba(168, 85, 247, 0.12)" :
-          node.category === "agent" ? "rgba(236, 72, 153, 0.12)" :
-          (isLight ? "rgba(15, 23, 42, 0.08)" : "rgba(185, 188, 194, 0.1)");
-
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, node.size + (isHovered || selected ? glow + 4 : glow), 0, Math.PI * 2);
-        ctx.fill();
-
-        // Node fill color
-        ctx.fillStyle = 
-          node.category === "fact" ? (isLight ? "#0284c7" : "#5DF7FF") :
-          node.category === "skill" ? "#A855F7" :
-          node.category === "agent" ? "#EC4899" :
-          (isLight ? "#475569" : "#B9BCC2");
-
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, node.size + (isHovered ? 2 : 0), 0, Math.PI * 2);
-        ctx.fill();
-
-        // High brightness core
-        ctx.fillStyle = "#FFFFFF";
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, node.size * 0.35, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Label text
-        ctx.fillStyle = isHovered || selected 
-          ? (isLight ? "#0f172a" : "#FFFFFF") 
-          : (isLight ? "rgba(15, 23, 42, 0.65)" : "rgba(255, 255, 255, 0.55)");
-        ctx.font = "10px var(--font-mono)";
-        ctx.textAlign = "center";
-        ctx.fillText(node.label, node.x, node.y - node.size - 10);
-      });
-
-      animationId = requestAnimationFrame(render);
-    };
-
-    render();
-
-    // Mouse handlers on canvas
-    const handleCanvasClick = (e: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      const clickX = e.clientX - rect.left;
-      const clickY = e.clientY - rect.top;
-
-      let clickedNode: Node | null = null;
-      nodes.forEach((node) => {
-        const dist = Math.sqrt(Math.pow(node.x - clickX, 2) + Math.pow(node.y - clickY, 2));
-        if (dist < node.size + 15) {
-          clickedNode = node;
-        }
-      });
-
-      setSelectedNode(clickedNode);
-    };
-
-    const handleCanvasMouseMove = (e: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      mouseRef.current.x = e.clientX - rect.left;
-      mouseRef.current.y = e.clientY - rect.top;
-    };
-
-    canvas.addEventListener("click", handleCanvasClick);
-    canvas.addEventListener("mousemove", handleCanvasMouseMove);
-
-    return () => {
-      cancelAnimationFrame(animationId);
-      canvas.removeEventListener("click", handleCanvasClick);
-      canvas.removeEventListener("mousemove", handleCanvasMouseMove);
-    };
-  }, [nodes, selectedNode]);
-
-  const learnedInsights = [
-    { title: "Continuous Synaptic Indexing", desc: "Successfully aligned 1,420 unprompted memory points across user code sessions to map structural software frameworks natively.", timestamp: "Just now" },
-    { title: "Defensive Code Verification Patterns", desc: "Learned that the user prefers paranoid boundary checks. Saved rule: 'Always write explicit integer overflow protections in smart contracts'." , timestamp: "4 hours ago" },
-    { title: "Solana Rent Exemption Formulas", desc: "Acquired full mathematical model for rent calculation. Applied during recent vesting wrapper construction." , timestamp: "Yesterday" }
-  ];
-
-  const filteredNodes = nodes.filter(node => 
-    node.label.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    node.details.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const { state, knowledge } = brain;
 
   return (
     <div className="w-full max-w-7xl mx-auto px-4 py-6 md:px-8 select-none">
-      
-      {/* Header section */}
+      {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 pb-4 border-b border-white/5">
         <div>
           <h2 className="text-xl font-display font-medium text-white flex items-center gap-2">
-            <Database className="text-neural-cyan animate-pulse" size={20} />
-            Autonomous Memory System
+            <Database className="text-neural-cyan" size={20} />
+            Project Brain
           </h2>
           <p className="text-xs text-titanium/50 font-mono mt-0.5">
-            DYNAMIC SYNAPSE ENGINE • FACT ACQUISITION FEED • COGNITIVE TIMELINE
+            VERSION {brain.version} • LAST UPDATED {new Date(brain.updatedAt).toLocaleString()}
           </p>
         </div>
 
-        {/* Filter input */}
-        <div className="relative w-full md:w-80">
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Query memory graph index..."
-            className="w-full bg-[#111111]/80 border border-white/10 rounded-xl py-2 pl-9 pr-4 text-xs text-white focus:outline-none focus:border-neural-cyan/40"
-          />
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-titanium/40" size={13} />
-        </div>
+        <button
+          onClick={loadData}
+          className="flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-titanium/60 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg transition-colors"
+        >
+          <RefreshCw size={12} />
+          Refresh
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-        
-        {/* Interactive Neural memory graph */}
-        <div className="lg:col-span-8 flex flex-col justify-between liquid-glass rounded-2xl border border-white/5 overflow-hidden min-h-[480px]">
-          <div className="p-4 border-b border-white/5 bg-white/[0.01] flex justify-between items-center">
-            <div className="flex items-center gap-1.5 text-xs font-mono text-titanium/60">
-              <GitFork size={14} className="text-neural-cyan" />
-              <span>INTERACTIVE MEMORY PLOTTER (NEURO-GRAPH)</span>
-            </div>
-            <div className="flex gap-4 text-[9px] font-mono">
-              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-neural-cyan" /> Fact Node</span>
-              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[#A855F7]" /> Acquired Skill</span>
-              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[#EC4899]" /> Agent Sync</span>
-            </div>
-          </div>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Main Brain Content */}
+        <div className="lg:col-span-8 space-y-4">
+          {/* State Section */}
+          <BrainSection
+            title="Project State"
+            icon={<Target size={14} className="text-neural-cyan" />}
+            expanded={expandedSections.has("state")}
+            onToggle={() => toggleSection("state")}
+          >
+            <div className="space-y-3">
+              {state.currentGoal && (
+                <BrainField label="Current Goal" value={state.currentGoal} icon={<Target size={12} />} />
+              )}
+              {state.currentTask && (
+                <BrainField label="Working On" value={state.currentTask} icon={<FileCode size={12} />} />
+              )}
+              {state.nextStep && (
+                <BrainField label="Next Step" value={state.nextStep} icon={<ChevronRight size={12} />} />
+              )}
+              {state.activeFeature && (
+                <BrainField label="Active Feature" value={state.activeFeature} icon={<GitBranch size={12} />} />
+              )}
+              {state.currentFile && (
+                <BrainField label="Current File" value={state.currentFile} icon={<FileCode size={12} />} />
+              )}
 
-          <div className="flex-1 relative bg-black/10">
-            <canvas ref={canvasRef} className="block w-full" id="memory-canvas-node-network" />
-            
-            <div className="absolute bottom-4 left-4 p-3 bg-black/60 border border-white/5 rounded-xl backdrop-blur-md max-w-sm pointer-events-none">
-              <div className="text-[10px] font-mono text-titanium/40">INTERACTION TIP</div>
-              <p className="text-[11px] text-white/80 mt-0.5 leading-relaxed">
-                Click on any pulsing neural core to parse and extract specific cognitive facts, parameters, and saved context attributes.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Selected Node Details Card or Insights Panel */}
-        <div className="lg:col-span-4 flex flex-col justify-between gap-6">
-          
-          <AnimatePresence mode="wait">
-            {selectedNode ? (
-              <motion.div
-                key={selectedNode.id}
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                className="p-5 liquid-glass rounded-2xl border border-neural-cyan/15 bg-gradient-to-b from-neural-cyan/5 to-transparent flex-1 flex flex-col justify-between"
-              >
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded uppercase tracking-wider"
-                      style={{
-                        backgroundColor: 
-                          selectedNode.category === "fact" ? "rgba(93, 247, 255, 0.1)" :
-                          selectedNode.category === "skill" ? "rgba(168, 85, 247, 0.1)" :
-                          "rgba(236, 72, 153, 0.1)",
-                        color:
-                          selectedNode.category === "fact" ? "#5DF7FF" :
-                          selectedNode.category === "skill" ? "#A855F7" :
-                          "#EC4899"
-                      }}
-                    >
-                      {selectedNode.category} Memory
-                    </span>
-                    <span className="text-[10px] font-mono text-titanium/40">{selectedNode.timestamp}</span>
-                  </div>
-
-                  <h3 className="text-base font-display font-semibold text-white mt-3 leading-snug">
-                    {selectedNode.label}
-                  </h3>
-
-                  <div className="text-xs text-titanium/70 font-mono mt-4 leading-relaxed bg-[#050505]/60 p-4 border border-white/5 rounded-xl">
-                    {selectedNode.details}
-                  </div>
-                </div>
-
-                <div className="mt-6 pt-4 border-t border-white/5 flex items-center justify-between">
-                  <span className="text-[9px] font-mono text-titanium/40">INDEXED_ADDR: MD5_0x{selectedNode.id}9F...</span>
-                  <button 
-                    onClick={() => setSelectedNode(null)}
-                    className="text-xs text-neural-cyan hover:text-white transition-colors"
-                  >
-                    Clear Focus
-                  </button>
-                </div>
-              </motion.div>
-            ) : (
-              <div className="p-5 liquid-glass rounded-2xl border border-white/5 flex-1 flex flex-col justify-between">
-                <div>
-                  <h3 className="text-xs font-mono text-neural-cyan uppercase tracking-wider flex items-center gap-1.5">
-                    <Sparkles size={12} />
-                    Unprompted Acquired Insights
-                  </h3>
-                  <p className="text-[11px] text-titanium/50 font-sans mt-0.5">
-                    Self-retained knowledge synthesized silently during ambient runtimes.
-                  </p>
-
-                  <div className="space-y-3 mt-4">
-                    {learnedInsights.map((insight, idx) => (
-                      <div key={idx} className="p-3 bg-white/[0.02] border border-white/5 rounded-xl hover:bg-white/[0.04] transition-colors">
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs font-semibold text-white/95 line-clamp-1">{insight.title}</span>
-                          <span className="text-[9px] font-mono text-titanium/30 truncate ml-2">{insight.timestamp}</span>
-                        </div>
-                        <p className="text-[11px] text-titanium/50 mt-1 leading-relaxed">
-                          {insight.desc}
-                        </p>
+              {state.tasks.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="text-xs font-mono text-titanium/60 mb-2">TASKS</h4>
+                  <div className="space-y-1">
+                    {state.tasks.map((task) => (
+                      <div key={task.id} className="flex items-center gap-2 text-sm">
+                        {task.status === "done" ? (
+                          <CheckCircle size={12} className="text-green-400" />
+                        ) : task.status === "doing" ? (
+                          <Clock size={12} className="text-yellow-400" />
+                        ) : (
+                          <div className="w-3 h-3 rounded-full border border-titanium/30" />
+                        )}
+                        <span
+                          className={
+                            task.status === "done"
+                              ? "text-titanium/40 line-through"
+                              : "text-white/80"
+                          }
+                        >
+                          {task.title}
+                        </span>
                       </div>
                     ))}
                   </div>
                 </div>
+              )}
 
-                <div className="text-[9px] font-mono text-titanium/30 text-center pt-4 border-t border-white/5">
-                  MIMO RE-INDEXES NEURO-LINKS AUTOMATICALLY EACH TERM
+              {state.knownIssues.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="text-xs font-mono text-titanium/60 mb-2">KNOWN ISSUES</h4>
+                  <div className="space-y-1">
+                    {state.knownIssues.map((issue) => (
+                      <div key={issue.id} className="flex items-center gap-2 text-sm">
+                        <AlertTriangle
+                          size={12}
+                          className={
+                            issue.severity === "critical"
+                              ? "text-red-400"
+                              : issue.severity === "high"
+                              ? "text-orange-400"
+                              : "text-yellow-400"
+                          }
+                        />
+                        <span className="text-white/80">{issue.title}</span>
+                        <span className="text-[10px] font-mono text-titanium/40 ml-auto">
+                          {issue.severity}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
-          </AnimatePresence>
-          
+              )}
+
+              {!state.currentGoal &&
+                !state.currentTask &&
+                !state.nextStep &&
+                state.tasks.length === 0 && (
+                  <p className="text-xs text-titanium/40 italic">
+                    No state captured yet — brain will update as you chat
+                  </p>
+                )}
+            </div>
+          </BrainSection>
+
+          {/* Knowledge Section */}
+          <BrainSection
+            title="Project Knowledge"
+            icon={<Lightbulb size={14} className="text-purple-400" />}
+            expanded={expandedSections.has("knowledge")}
+            onToggle={() => toggleSection("knowledge")}
+          >
+            <div className="space-y-4">
+              {knowledge.overview && (
+                <div>
+                  <h4 className="text-xs font-mono text-titanium/60 mb-1">OVERVIEW</h4>
+                  <p className="text-sm text-white/80">{knowledge.overview}</p>
+                </div>
+              )}
+
+              {knowledge.decisions.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-mono text-titanium/60 mb-2">DECISIONS</h4>
+                  <div className="space-y-2">
+                    {knowledge.decisions.map((decision, idx) => (
+                      <div
+                        key={idx}
+                        className="p-3 bg-white/[0.02] border border-white/5 rounded-lg"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium text-white/90">{decision.title}</span>
+                          <span className="text-[10px] font-mono text-titanium/40">
+                            {new Date(decision.date).toLocaleDateString()}
+                          </span>
+                        </div>
+                        <p className="text-xs text-titanium/60 mt-1">{decision.rationale}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {knowledge.architecture.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-mono text-titanium/60 mb-2">ARCHITECTURE</h4>
+                  <div className="space-y-2">
+                    {knowledge.architecture.map((item, idx) => (
+                      <div
+                        key={idx}
+                        className="p-3 bg-white/[0.02] border border-white/5 rounded-lg"
+                      >
+                        <span className="text-sm font-medium text-white/90">{item.title}</span>
+                        <p className="text-xs text-titanium/60 mt-1">{item.detail}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {knowledge.techChoices.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-mono text-titanium/60 mb-2">TECH CHOICES</h4>
+                  <div className="space-y-1">
+                    {knowledge.techChoices.map((tc, idx) => (
+                      <div key={idx} className="flex items-start gap-2 text-sm">
+                        <span className="text-neural-cyan font-medium">{tc.area}:</span>
+                        <span className="text-white/80">{tc.choice}</span>
+                        <span className="text-titanium/40">— {tc.reason}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {knowledge.conventions.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-mono text-titanium/60 mb-2">CONVENTIONS</h4>
+                  <ul className="space-y-1">
+                    {knowledge.conventions.map((c, idx) => (
+                      <li key={idx} className="text-sm text-white/80 flex items-start gap-2">
+                        <span className="text-titanium/40">•</span>
+                        {c}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {knowledge.rules.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-mono text-titanium/60 mb-2">RULES</h4>
+                  <ul className="space-y-1">
+                    {knowledge.rules.map((r, idx) => (
+                      <li key={idx} className="text-sm text-white/80 flex items-start gap-2">
+                        <span className="text-titanium/40">•</span>
+                        {r}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {knowledge.userPreferences.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-mono text-titanium/60 mb-2">USER PREFERENCES</h4>
+                  <ul className="space-y-1">
+                    {knowledge.userPreferences.map((p, idx) => (
+                      <li key={idx} className="text-sm text-white/80 flex items-start gap-2">
+                        <span className="text-titanium/40">•</span>
+                        {p}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {!knowledge.overview &&
+                knowledge.decisions.length === 0 &&
+                knowledge.architecture.length === 0 && (
+                  <p className="text-xs text-titanium/40 italic">
+                    No knowledge captured yet — brain will learn as you chat
+                  </p>
+                )}
+            </div>
+          </BrainSection>
         </div>
 
+        {/* Suggestions Panel */}
+        <div className="lg:col-span-4">
+          <div className="liquid-glass rounded-2xl border border-white/5 p-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-mono text-titanium/60 flex items-center gap-1.5">
+                <Eye size={12} className="text-purple-400" />
+                PENDING SUGGESTIONS
+              </h3>
+              <span className="text-[10px] font-mono text-titanium/40 bg-white/5 px-2 py-0.5 rounded">
+                {suggestions.length}
+              </span>
+            </div>
+
+            {suggestions.length === 0 ? (
+              <p className="text-xs text-titanium/40 text-center py-8">
+                No pending suggestions
+              </p>
+            ) : (
+              <div className="space-y-3">
+                <AnimatePresence>
+                  {suggestions.map((suggestion) => (
+                    <motion.div
+                      key={suggestion.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, x: -20 }}
+                      className="p-3 bg-white/[0.02] border border-white/5 rounded-lg"
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-purple-500/10 text-purple-400">
+                          {suggestion.section}
+                        </span>
+                        <span className="text-[10px] font-mono text-titanium/40">
+                          {suggestion.operation}
+                        </span>
+                      </div>
+
+                      {suggestion.reason && (
+                        <p className="text-xs text-titanium/60 mb-2">{suggestion.reason}</p>
+                      )}
+
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleApprove(suggestion.id)}
+                          className="flex-1 flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-mono text-green-400 bg-green-500/10 hover:bg-green-500/20 rounded transition-colors"
+                        >
+                          <CheckCircle size={10} />
+                          Save
+                        </button>
+                        <button
+                          onClick={() => handleIgnore(suggestion.id)}
+                          className="flex-1 flex items-center justify-center gap-1 px-2 py-1 text-[10px] font-mono text-titanium/60 bg-white/5 hover:bg-white/10 rounded transition-colors"
+                        >
+                          <EyeOff size={10} />
+                          Ignore
+                        </button>
+                      </div>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function BrainSection({
+  title,
+  icon,
+  expanded,
+  onToggle,
+  children,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  expanded: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="liquid-glass rounded-2xl border border-white/5 overflow-hidden">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center justify-between p-4 hover:bg-white/[0.02] transition-colors"
+      >
+        <div className="flex items-center gap-2 text-xs font-mono text-titanium/60">
+          {icon}
+          <span>{title}</span>
+        </div>
+        {expanded ? (
+          <ChevronDown size={14} className="text-titanium/40" />
+        ) : (
+          <ChevronRight size={14} className="text-titanium/40" />
+        )}
+      </button>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="px-4 pb-4">{children}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function BrainField({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: string;
+  icon: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-start gap-2">
+      <span className="text-titanium/40 mt-0.5">{icon}</span>
+      <div>
+        <span className="text-[10px] font-mono text-titanium/60 uppercase">{label}</span>
+        <p className="text-sm text-white/80">{value}</p>
       </div>
     </div>
   );

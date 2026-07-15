@@ -2,6 +2,7 @@ import { sessionRepository } from '../storage/sessionRepository';
 import { messageRepository } from '../storage/messageRepository';
 import { getDatabase } from '../storage/database';
 import { getProvider } from '../providers';
+import { contextManager } from '../context/ContextManager';
 import { NotFoundError, InternalServerError } from '../middleware/errors';
 import { logger } from '../config/logger';
 import type { ChatResponse, Message, ProviderMessage } from '../types';
@@ -11,11 +12,14 @@ import type { ChatResponse, Message, ProviderMessage } from '../types';
  *
  * Flow:
  *   1. Validate that the session exists.
- *   2. Persist the incoming user message.
- *   3. Load the full conversation history.
- *   4. Send the history to the active AI provider.
- *   5. Persist the assistant response.
- *   6. Return the assistant message.
+ *   2. Ensure the session is assigned to a project.
+ *   3. Build context injection from brain (if available).
+ *   4. Persist the incoming user message.
+ *   5. Load the full conversation history.
+ *   6. Send the history to the active AI provider.
+ *   7. Persist the assistant response.
+ *   8. Fire-and-forget memory update.
+ *   9. Return the assistant message.
  */
 export const chatService = {
   async sendMessage(sessionId: string, userContent: string, mode?: string): Promise<ChatResponse> {
@@ -25,19 +29,30 @@ export const chatService = {
       throw new NotFoundError(`Session with id "${sessionId}" not found`);
     }
 
-    // 2. Build the conversation history including the incoming user message.
+    // 2. Ensure the session is assigned to a project (auto-assign if needed).
+    const projectId = contextManager.ensureProjectForSession(sessionId);
+
+    // 3. Build context injection from brain (if available).
+    const contextInjection = contextManager.buildInjection(projectId);
+
+    // 4. Build the conversation history including the incoming user message.
     const history = messageRepository.findHistoryBySessionId(sessionId);
-    const requestHistory: ProviderMessage[] = [
+    const trimmedHistory = trimHistory([
       ...history,
       { role: 'user', content: userContent },
-    ];
-    const trimmedHistory = trimHistory(requestHistory, 40);
+    ], 40);
 
-    // 3. Ask the provider for a reply.
+    // 5. Prepend context injection AFTER trimming so it's never removed.
+    const requestHistory: ProviderMessage[] = [
+      ...(contextInjection ? [contextInjection] : []),
+      ...trimmedHistory,
+    ];
+
+    // 6. Ask the provider for a reply.
     const provider = getProvider();
     let result;
     try {
-      result = await provider.sendMessage(trimmedHistory, mode);
+      result = await provider.sendMessage(requestHistory, mode);
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       logger.error(
@@ -51,7 +66,7 @@ export const chatService = {
       );
     }
 
-    // 4. Persist both messages atomically.
+    // 7. Persist both messages atomically.
     const db = getDatabase();
     const insertMessages = db.transaction(() => {
       messageRepository.create({
@@ -73,7 +88,10 @@ export const chatService = {
       'Assistant response stored',
     );
 
-    // 6. Return the response.
+    // 8. Fire-and-forget memory update (never blocks the response).
+    contextManager.afterExchange(projectId, sessionId, userContent, result.content);
+
+    // 9. Return the response.
     return {
       sessionId,
       message: assistantMessage,

@@ -92,6 +92,123 @@ export async function deleteSession(sessionId: string): Promise<void> {
   }
 }
 
+export interface ApiSessionSummary {
+  id: string;
+  createdAt: string;
+  title: string | null;
+  messageCount: number;
+  lastActivityAt: string;
+}
+
+export async function listSessions(): Promise<ApiSessionSummary[]> {
+  const res = await fetch(`${API_BASE}/session`);
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+  const { data } = await res.json();
+  return data || [];
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  status: 'active' | 'archived';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function listProjects(): Promise<Project[]> {
+  const res = await fetch(`${API_BASE}/project`);
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+  const { data } = await res.json();
+  return data || [];
+}
+
+export interface BrainState {
+  currentGoal: string | null;
+  currentTask: string | null;
+  currentFile: string | null;
+  nextStep: string | null;
+  activeFeature: string | null;
+  sessionProgress: string | null;
+  tasks: Array<{ id: string; title: string; status: 'todo' | 'doing' | 'done' }>;
+  knownIssues: Array<{ id: string; title: string; severity: string; status: string }>;
+  updatedAt: string;
+}
+
+export interface BrainKnowledge {
+  overview: string | null;
+  architecture: Array<{ title: string; detail: string }>;
+  decisions: Array<{ title: string; rationale: string; date: string }>;
+  techChoices: Array<{ area: string; choice: string; reason: string }>;
+  conventions: string[];
+  rules: string[];
+  userPreferences: string[];
+  updatedAt: string;
+}
+
+export interface ProjectBrain {
+  projectId: string;
+  version: number;
+  state: BrainState;
+  knowledge: BrainKnowledge;
+  updatedAt: string;
+}
+
+export interface Suggestion {
+  id: string;
+  projectId: string;
+  target: 'state' | 'knowledge';
+  section: string;
+  operation: string;
+  value: string;
+  reason: string | null;
+  status: 'pending' | 'approved' | 'ignored';
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+export async function getBrain(projectId: string): Promise<ProjectBrain | null> {
+  const res = await fetch(`${API_BASE}/context/brain?projectId=${projectId}`);
+  if (!res.ok) {
+    if (res.status === 404) return null;
+    throw new Error(await parseError(res));
+  }
+  const { data } = await res.json();
+  return data;
+}
+
+export async function getSuggestions(projectId: string, status?: string): Promise<Suggestion[]> {
+  const params = new URLSearchParams({ projectId });
+  if (status) params.set('status', status);
+  const res = await fetch(`${API_BASE}/context/suggestions?${params}`);
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+  const { data } = await res.json();
+  return data || [];
+}
+
+export async function approveSuggestion(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/context/suggestions/${id}/approve`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+}
+
+export async function ignoreSuggestion(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/context/suggestions/${id}/ignore`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+}
+
 export async function healthCheck(): Promise<{ status: string }> {
   const res = await fetch('http://localhost:3001/health');
   if (!res.ok) throw new Error(`Health check failed: ${res.status}`);

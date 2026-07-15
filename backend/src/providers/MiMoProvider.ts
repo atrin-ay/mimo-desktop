@@ -12,6 +12,19 @@ import { URL } from 'node:url';
 
 const SYSTEM_PROMPT = `You are MiMo, a helpful and accurate AI assistant. Keep answers concise and relevant. Always return valid JSON-safe text.`;
 
+function getSystemPrompt(mode?: string): string {
+  switch (mode) {
+    case 'plan':
+      return 'You are MiMo in Plan mode. Think step-by-step and provide a structured plan. Do NOT use any tools or execute commands. Just reason through the problem and present your analysis and plan in plain text.';
+    case 'agent':
+      return 'You are MiMo in Agent mode. You have full access to tools. Execute commands, read/write files, and complete tasks autonomously.';
+    case 'direct':
+    case 'chat':
+    default:
+      return SYSTEM_PROMPT;
+  }
+}
+
 function postJson(url: string, headers: Record<string, string>, body: unknown): Promise<{ status: number; bodyText: string; json: unknown }> {
   const parsedUrl = new URL(url);
   const requestFn = parsedUrl.protocol === 'https:' ? httpsRequest : httpRequest;
@@ -75,7 +88,7 @@ export class MiMoProvider implements AIProvider {
     const payload = {
       model: env.mimoModel,
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: getSystemPrompt(mode) },
         ...messages.map((message) => ({
           role: message.role,
           content: message.content,

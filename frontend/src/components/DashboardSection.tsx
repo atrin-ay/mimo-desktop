@@ -1,23 +1,24 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { 
-  MessageSquare, 
-  Terminal, 
-  Zap, 
-  Database, 
-  Sparkles, 
-  ArrowRight, 
+import {
+  MessageSquare,
+  Terminal,
+  Zap,
+  Database,
+  Sparkles,
+  ArrowRight,
   FolderPlus,
   Play,
   Plus,
   Activity,
   Cpu,
   Layers,
-  ShieldAlert
+  ShieldAlert,
 } from "lucide-react";
 import { translations } from "../utils/translations";
 import { OrbState } from "../types";
 import Orb from "./Orb";
+import { listProjects, type Project } from "../api";
 
 interface DashboardSectionProps {
   language: "en" | "fa";
@@ -29,35 +30,47 @@ interface DashboardSectionProps {
   orbState: OrbState;
 }
 
-export default function DashboardSection({ 
-  language, 
-  onNavigate, 
+export default function DashboardSection({
+  language,
+  onNavigate,
   onNavigateToProject,
   onNavigateToChat,
   subjects,
   projects,
-  orbState
+  orbState,
 }: DashboardSectionProps) {
   const t = translations[language];
+  const [apiProjects, setApiProjects] = useState<Project[]>([]);
+
+  useEffect(() => {
+    listProjects()
+      .then(setApiProjects)
+      .catch(() => {});
+  }, []);
 
   // Filter recent personal chats
-  const recentPersonalChats = subjects.filter(s => s.category === "personal").slice(0, 3);
-  
-  // Recent projects
-  const recentProjects = projects.slice(0, 3);
+  const recentPersonalChats = subjects.filter((s) => s.category === "personal").slice(0, 3);
+
+  // Recent projects (combine local + API projects, dedupe by id)
+  const allProjects = [...projects, ...apiProjects.filter((p) => !projects.find((lp: any) => lp.id === p.id))];
+  const recentProjects = allProjects.slice(0, 3);
 
   // Recent automations list (mocked based on templates/saved)
   const recentAutomations = [
     { title: "Inbox Zero Sweep", desc: "Scan email threads & compose responses", icon: Zap, iconColor: "text-red-400" },
-    { title: "Meeting Synthesizer", desc: "Draft action items from transcripts", icon: Sparkles, iconColor: "text-purple-400" }
+    { title: "Meeting Synthesizer", desc: "Draft action items from transcripts", icon: Sparkles, iconColor: "text-purple-400" },
   ];
 
-  // Recent memories (mocked based on MemorySystem nodes)
-  const recentMemories = [
-    { label: "Smart Contract Vulnerability", cat: "fact", details: "Identified staking overflow vulnerabilities prior to 0.8.20." },
-    { label: "Low Latency C++ Ring Buffer", cat: "skill", details: "Atomic buffer optimized read/write pointer latency to < 1.8ns." },
-    { label: "Solana Token Economics", cat: "fact", details: "Synthesized Liquid Staking curve curves." }
-  ];
+  // Use real API projects for memory insights (brain data)
+  const recentMemories = apiProjects.length > 0
+    ? apiProjects.slice(0, 3).map((p) => ({
+        label: p.name,
+        cat: "project",
+        details: `Project: ${p.name} — Last updated ${new Date(p.updatedAt).toLocaleDateString()}`,
+      }))
+    : [
+        { label: "No projects yet", cat: "info", details: "Start a chat to create your first project and build brain context." },
+      ];
 
   return (
     <div className="w-full max-w-7xl mx-auto px-4 py-6 md:px-8 select-none text-left relative overflow-hidden animate-fadeIn">
@@ -204,7 +217,7 @@ export default function DashboardSection({
                   <div className="text-left max-w-[70%]">
                     <h4 className="text-xs font-semibold text-white/90 truncate">{proj.name}</h4>
                     <span className="text-[9px] text-neural-cyan font-mono bg-neural-cyan/10 px-1.5 py-0.5 rounded mt-1.5 inline-block">
-                      {proj.documents.length} Files Linked
+                      {proj.documents?.length ?? 0} Files Linked
                     </span>
                   </div>
                   <span className="text-[9px] font-mono text-titanium/30 shrink-0">{proj.date}</span>

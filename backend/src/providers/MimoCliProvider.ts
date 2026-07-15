@@ -9,6 +9,61 @@ import { logger } from '../config/logger';
 import * as fs from 'fs';
 import * as path from 'path';
 
+// ─── MiMo CLI response types ────────────────────────────────────────────────
+
+export interface CliSessionInfo {
+  id: string;
+  title: string;
+  updatedAt: number;
+}
+
+export interface CliExportedSession {
+  info: {
+    id: string;
+    title: string;
+    projectID: string;
+    directory: string;
+    time: { created: number; updated: number };
+  };
+  messages: Array<{
+    info: {
+      id: string;
+      sessionID: string;
+      role: 'user' | 'assistant' | 'system';
+      agent?: string;
+      model?: { providerID: string; modelID: string };
+      time?: { created: number; completed?: number };
+      tokens?: { total: number; input: number; output: number; reasoning: number };
+      cost?: number;
+      mode?: string;
+      parentID?: string;
+      finish?: string;
+    };
+    parts: Array<{
+      type: string;
+      id?: string;
+      text?: string;
+      tool?: string;
+      callID?: string;
+      state?: { status: string; input?: Record<string, unknown>; output?: string };
+      time?: { start: number; end: number };
+      tokens?: { total: number; input: number; output: number; reasoning: number };
+      cost?: number;
+      reason?: string;
+    }>;
+  }>;
+}
+
+export interface CliConfig {
+  model?: string;
+  provider?: string;
+  apiKey?: string;
+  workdir?: string;
+  [key: string]: unknown;
+}
+
+// ─── Binary detection ────────────────────────────────────────────────────────
+
 function findMimoBinary(): string {
   const candidates: string[] = [];
 
@@ -64,6 +119,79 @@ function findMimoBinary(): string {
   return 'mimo';
 }
 
+// ─── Common CLI environment ──────────────────────────────────────────────────
+
+function cliEnv(): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    CHCP: '65001',
+    PYTHONIOENCODING: 'utf-8',
+    LANG: 'en_US.UTF-8',
+    LC_ALL: 'en_US.UTF-8',
+  };
+}
+
+function cliCwd(): string {
+  return process.env.USERPROFILE || process.env.HOME || '.';
+}
+
+// ─── CLI execution helpers ───────────────────────────────────────────────────
+
+/** Spawn a MiMo CLI command and collect stdout/stderr. Resolves with { stdout, stderr, code }. */
+function execCli(
+  binary: string,
+  args: string[],
+  opts?: { timeout?: number },
+): Promise<{ stdout: string; stderr: string; code: number | null }> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(binary, args, {
+      cwd: cliCwd(),
+      shell: false,
+      env: cliEnv(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout?.on('data', (data: Buffer) => { stdout += data.toString('utf-8'); });
+    proc.stderr?.on('data', (data: Buffer) => { stderr += data.toString('utf-8'); });
+
+    const timer = opts?.timeout
+      ? setTimeout(() => { proc.kill('SIGTERM'); }, opts.timeout)
+      : undefined;
+
+    proc.on('close', (code) => {
+      if (timer) clearTimeout(timer);
+      resolve({ stdout, stderr, code });
+    });
+
+    proc.on('error', (err) => {
+      if (timer) clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
+/** Parse JSON from CLI stdout, returning null on failure. */
+function parseJsonOutput(stdout: string): unknown {
+  const trimmed = stdout.trim();
+  if (!trimmed) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    // Try to find JSON in the output (MiMo sometimes prints non-JSON before JSON)
+    const jsonMatch = trimmed.match(/\{[\s\S]*\}/) || trimmed.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      try { return JSON.parse(jsonMatch[0]); } catch {}
+    }
+    return null;
+  }
+}
+
+// ─── Provider implementation ─────────────────────────────────────────────────
+
 export class MimoCliProvider implements AIProvider {
   readonly name = 'mimo-cli';
   private binary: string;
@@ -73,93 +201,37 @@ export class MimoCliProvider implements AIProvider {
     logger.info({ binary: this.binary }, 'MimoCliProvider initialized');
   }
 
+  // ── AIProvider interface ─────────────────────────────────────────────────
+
   async sendMessage(messages: ProviderMessage[], mode?: string): Promise<ProviderResult> {
     if (messages.length === 0) {
       throw new Error('MimoCliProvider requires at least one message');
     }
 
-    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
-    if (!lastUserMsg) {
-      throw new Error('No user message found');
-    }
-
-    let prompt = lastUserMsg.content;
-    if (messages.length > 1) {
-      const historyParts = messages
-        .filter(m => m !== lastUserMsg)
-        .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`);
-      prompt = historyParts.join('\n') + '\n\nUser: ' + lastUserMsg.content;
-    }
-
+    const prompt = this.buildPrompt(messages, mode);
     logger.info({ messageCount: messages.length, mode }, 'MimoCliProvider sending request');
 
-    return new Promise((resolve, reject) => {
-      const args = ['run', '--format', 'json', prompt];
-      const cwd = process.env.USERPROFILE || process.env.HOME || '.';
+    const { stdout, stderr, code } = await execCli(this.binary, ['run', '--format', 'json', prompt]);
 
-      const proc = spawn(this.binary, args, {
-        cwd,
-        shell: false,
-        env: {
-          ...process.env,
-          CHCP: '65001',
-          PYTHONIOENCODING: 'utf-8',
-          LANG: 'en_US.UTF-8',
-          LC_ALL: 'en_US.UTF-8',
+    const events = this.parseCliOutput(stdout);
+    const lastTextEvent = events.filter((e: any) => e.type === 'text').pop();
+    const content = lastTextEvent?.part?.text || '';
+
+    if (content) {
+      logger.info({ eventsCount: events.length, contentLength: content.length }, 'MimoCliProvider response received');
+      return {
+        content,
+        metadata: {
+          provider: this.name,
+          eventsCount: events.length,
         },
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-      });
+      };
+    }
 
-      let stdoutBuffer = '';
-      let stderrOutput = '';
-      const events: any[] = [];
-
-      proc.stdout?.on('data', (data: Buffer) => {
-        stdoutBuffer += data.toString('utf-8');
-      });
-
-      proc.stderr?.on('data', (data: Buffer) => {
-        stderrOutput += data.toString('utf-8');
-      });
-
-      proc.on('close', (code) => {
-        const lines = stdoutBuffer.split('\n').filter(l => l.trim());
-        for (const line of lines) {
-          try {
-            events.push(JSON.parse(line.trim()));
-          } catch {
-            // non-JSON output, ignore
-          }
-        }
-
-        const lastTextEvent = events.filter((e: any) => e.type === 'text').pop();
-        const content = lastTextEvent?.part?.text || '';
-
-        if (content) {
-          logger.info({ eventsCount: events.length, contentLength: content.length }, 'MimoCliProvider response received');
-          resolve({
-            content,
-            metadata: {
-              provider: this.name,
-              eventsCount: events.length,
-            },
-          });
-        } else {
-          const detail = stderrOutput || stdoutBuffer || `Process exited with code ${code}`;
-          logger.error({ code, detail }, 'MimoCliProvider: no text response');
-          reject(new Error(`MiMo CLI failed: ${detail.slice(0, 500)}`));
-        }
-      });
-
-      proc.on('error', (err) => {
-        logger.error({ error: err.message }, 'MimoCliProvider process error');
-        reject(new Error(`MiMo CLI error: ${err.message}`));
-      });
-    });
+    const detail = stderr || stdout || `Process exited with code ${code}`;
+    throw new Error(`MiMo CLI failed: ${detail.slice(0, 500)}`);
   }
 
-  /** Stream events from MiMo CLI in real-time via callback. */
   async sendMessageStream(
     messages: ProviderMessage[],
     mode: string | undefined,
@@ -169,35 +241,14 @@ export class MimoCliProvider implements AIProvider {
       throw new Error('MimoCliProvider requires at least one message');
     }
 
-    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
-    if (!lastUserMsg) {
-      throw new Error('No user message found');
-    }
-
-    let prompt = lastUserMsg.content;
-    if (messages.length > 1) {
-      const historyParts = messages
-        .filter(m => m !== lastUserMsg)
-        .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`);
-      prompt = historyParts.join('\n') + '\n\nUser: ' + lastUserMsg.content;
-    }
-
+    const prompt = this.buildPrompt(messages, mode);
     logger.info({ messageCount: messages.length, mode }, 'MimoCliProvider streaming request');
 
     return new Promise((resolve, reject) => {
-      const args = ['run', '--format', 'json', prompt];
-      const cwd = process.env.USERPROFILE || process.env.HOME || '.';
-
-      const proc = spawn(this.binary, args, {
-        cwd,
+      const proc = spawn(this.binary, ['run', '--format', 'json', prompt], {
+        cwd: cliCwd(),
         shell: false,
-        env: {
-          ...process.env,
-          CHCP: '65001',
-          PYTHONIOENCODING: 'utf-8',
-          LANG: 'en_US.UTF-8',
-          LC_ALL: 'en_US.UTF-8',
-        },
+        env: cliEnv(),
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
       });
@@ -281,109 +332,84 @@ export class MimoCliProvider implements AIProvider {
     }
   }
 
-  async listSessions(): Promise<Array<{ id: string; title: string; updatedAt: number }>> {
-    return new Promise((resolve, reject) => {
-      const args = ['session', 'list', '--format', 'json'];
-      const proc = spawn(this.binary, args, {
-        cwd: process.env.USERPROFILE || process.env.HOME || '.',
-        shell: false,
-        env: {
-          ...process.env,
-          CHCP: '65001',
-          PYTHONIOENCODING: 'utf-8',
-          LANG: 'en_US.UTF-8',
-          LC_ALL: 'en_US.UTF-8',
-        },
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-      });
+  // ── Session management (delegates to MiMo CLI) ──────────────────────────
 
-      let stdout = '';
-      let stderr = '';
-      proc.stdout?.on('data', (data: Buffer) => { stdout += data.toString('utf-8'); });
-      proc.stderr?.on('data', (data: Buffer) => { stderr += data.toString('utf-8'); });
-
-      proc.on('close', () => {
-        try {
-          const parsed = JSON.parse(stdout.trim());
-          const sessions = Array.isArray(parsed) ? parsed : [];
-          resolve(sessions.map((s: any) => ({
-            id: s.id,
-            title: s.title || 'New Session',
-            updatedAt: s.updated || s.updatedAt || Date.now(),
-          })));
-        } catch {
-          resolve([]);
-        }
-      });
-
-      proc.on('error', (err) => reject(err.message));
-    });
+  async listSessions(): Promise<CliSessionInfo[]> {
+    const { stdout } = await execCli(this.binary, ['session', 'list', '--format', 'json']);
+    const parsed = parseJsonOutput(stdout);
+    const sessions = Array.isArray(parsed) ? parsed : [];
+    return sessions.map((s: any) => ({
+      id: s.id,
+      title: s.title || 'New Session',
+      updatedAt: s.updated || s.updatedAt || Date.now(),
+    }));
   }
 
-  async exportSession(sessionId: string): Promise<any> {
-    return new Promise((resolve, reject) => {
-      const args = ['export', sessionId];
-      const proc = spawn(this.binary, args, {
-        cwd: process.env.USERPROFILE || process.env.HOME || '.',
-        shell: false,
-        env: {
-          ...process.env,
-          CHCP: '65001',
-          PYTHONIOENCODING: 'utf-8',
-          LANG: 'en_US.UTF-8',
-          LC_ALL: 'en_US.UTF-8',
-        },
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-      });
-
-      let stdout = '';
-      let stderr = '';
-      proc.stdout?.on('data', (data: Buffer) => { stdout += data.toString('utf-8'); });
-      proc.stderr?.on('data', (data: Buffer) => { stderr += data.toString('utf-8'); });
-
-      proc.on('close', () => {
-        try {
-          resolve(JSON.parse(stdout.trim()));
-        } catch (err) {
-          reject(new Error(`Failed to parse export: ${stderr || stdout.slice(0, 200)}`));
-        }
-      });
-
-      proc.on('error', (err) => reject(err.message));
-    });
+  async exportSession(sessionId: string): Promise<CliExportedSession> {
+    const { stdout, stderr } = await execCli(this.binary, ['export', sessionId]);
+    const parsed = parseJsonOutput(stdout);
+    if (!parsed) {
+      throw new Error(`Failed to parse export: ${stderr || stdout.slice(0, 200)}`);
+    }
+    return parsed as CliExportedSession;
   }
 
   async deleteSession(sessionId: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const args = ['session', 'delete', sessionId];
-      const proc = spawn(this.binary, args, {
-        cwd: process.env.USERPROFILE || process.env.HOME || '.',
-        shell: false,
-        env: {
-          ...process.env,
-          CHCP: '65001',
-          PYTHONIOENCODING: 'utf-8',
-          LANG: 'en_US.UTF-8',
-          LC_ALL: 'en_US.UTF-8',
-        },
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-      });
+    const { code, stderr } = await execCli(this.binary, ['session', 'delete', sessionId]);
+    if (code !== 0) {
+      throw new Error(`Failed to delete session: ${stderr || 'exit code ' + code}`);
+    }
+  }
 
-      let stderr = '';
-      proc.stderr?.on('data', (data: Buffer) => { stderr += data.toString('utf-8'); });
+  // ── MiMo CLI native capabilities ────────────────────────────────────────
 
-      proc.on('close', (code) => {
-        if (code === 0) {
-          resolve();
-        } else {
-          reject(new Error(`Failed to delete session: ${stderr || 'exit code ' + code}`));
-        }
-      });
+  /** Get MiMo CLI version. */
+  async getVersion(): Promise<string> {
+    const { stdout } = await execCli(this.binary, ['--version']);
+    return stdout.trim();
+  }
 
-      proc.on('error', (err) => reject(err.message));
-    });
+  /** Get MiMo CLI configuration/status. */
+  async getConfig(): Promise<CliConfig> {
+    const { stdout } = await execCli(this.binary, ['config', '--json']);
+    const parsed = parseJsonOutput(stdout);
+    return (parsed as CliConfig) || {};
+  }
+
+  /** Run an arbitrary MiMo CLI command and return raw output. */
+  async runCommand(args: string[]): Promise<{ stdout: string; stderr: string; code: number | null }> {
+    return execCli(this.binary, args);
+  }
+
+  // ── Internal helpers ─────────────────────────────────────────────────────
+
+  private buildPrompt(messages: ProviderMessage[], mode?: string): string {
+    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+    if (!lastUserMsg) {
+      throw new Error('No user message found');
+    }
+
+    let prompt = lastUserMsg.content;
+    if (messages.length > 1) {
+      const historyParts = messages
+        .filter(m => m !== lastUserMsg)
+        .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`);
+      prompt = historyParts.join('\n') + '\n\nUser: ' + lastUserMsg.content;
+    }
+
+    return prompt;
+  }
+
+  private parseCliOutput(stdout: string): any[] {
+    const events: any[] = [];
+    const lines = stdout.split('\n').filter(l => l.trim());
+    for (const line of lines) {
+      try {
+        events.push(JSON.parse(line.trim()));
+      } catch {
+        // non-JSON output, ignore
+      }
+    }
+    return events;
   }
 }

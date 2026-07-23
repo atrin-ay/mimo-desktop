@@ -5,7 +5,7 @@ import { getProvider } from '../providers';
 import { contextManager } from '../context/ContextManager';
 import { NotFoundError, InternalServerError } from '../middleware/errors';
 import { logger } from '../config/logger';
-import type { ChatResponse, Message, ProviderMessage } from '../types';
+import type { ChatResponse, Message, MiMoAgent, ProviderMessage } from '../types';
 
 /**
  * Business logic for the chat endpoint.
@@ -22,7 +22,7 @@ import type { ChatResponse, Message, ProviderMessage } from '../types';
  *   9. Return the assistant message.
  */
 export const chatService = {
-  async sendMessage(sessionId: string, userContent: string, mode?: string): Promise<ChatResponse> {
+  async sendMessage(sessionId: string, userContent: string, agent?: MiMoAgent, model?: string): Promise<ChatResponse> {
     // 1. Ensure the session exists.
     const session = sessionRepository.findById(sessionId);
     if (!session) {
@@ -52,7 +52,7 @@ export const chatService = {
     const provider = getProvider();
     let result;
     try {
-      result = await provider.sendMessage(requestHistory, mode);
+      result = await provider.sendMessage(requestHistory, agent, model);
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       logger.error(

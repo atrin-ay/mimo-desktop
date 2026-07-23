@@ -1,7 +1,8 @@
 import { useRef, useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { Terminal } from "lucide-react";
-import { OrbState, InteractionMode, Message } from "../types";
+import { OrbState, AgentName, Message } from "../types";
+import { ModelInfo } from "../api";
 import { translations } from "../utils/translations";
 import Orb from "./Orb";
 import ExecutionCard from "./ExecutionCard";
@@ -12,8 +13,12 @@ interface ChatViewProps {
   orbState: OrbState;
   setOrbState: (s: OrbState) => void;
   isLoading: boolean;
-  interactionMode: InteractionMode;
-  setInteractionMode: (m: InteractionMode) => void;
+  agent: AgentName;
+  setAgent: (agent: AgentName) => void;
+  model: string;
+  setModel: (model: string) => void;
+  models: ModelInfo[];
+  modelsLoading: boolean;
   onExecute: (cmd: string) => void;
   onAnswer: (answer: string) => void;
   onStop: () => void;
@@ -25,8 +30,12 @@ export default function ChatView({
   orbState,
   setOrbState,
   isLoading,
-  interactionMode,
-  setInteractionMode,
+  agent,
+  setAgent,
+  model,
+  setModel,
+  models,
+  modelsLoading,
   onExecute,
   onAnswer,
   onStop,
@@ -148,8 +157,12 @@ export default function ChatView({
           isLoading={isLoading}
           orbState={orbState}
           setOrbState={setOrbState}
-          interactionMode={interactionMode}
-          setInteractionMode={setInteractionMode}
+          agent={agent}
+          setAgent={setAgent}
+          model={model}
+          setModel={setModel}
+          models={models}
+          modelsLoading={modelsLoading}
           onStop={onStop}
           language={language}
         />

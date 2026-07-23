@@ -60,11 +60,14 @@ export interface CreateSessionRequest {
   id?: string;
 }
 
+/** Official MiMo agent names. */
+export type MiMoAgent = 'build' | 'plan' | 'compose';
+
 /** Request body for the chat endpoint. */
 export interface ChatRequest {
   sessionId: string;
   message: string;
-  mode?: 'direct' | 'plan' | 'agent';
+  agent?: MiMoAgent;
 }
 
 /** Response body for the chat endpoint. */

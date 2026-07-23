@@ -32,7 +32,7 @@ export const chatSchema = z.object({
       .string()
       .min(1, 'Message must not be empty')
       .max(8000, 'Message must be at most 8000 characters'),
-    mode: z.enum(['direct', 'plan', 'agent']).optional(),
+    agent: z.enum(['build', 'plan', 'compose']).optional(),
   }),
 });
 

@@ -6,7 +6,8 @@ import { getProvider } from '../providers';
 import { getDatabase } from '../storage/database';
 import { contextManager } from '../context/ContextManager';
 import { logger } from '../config/logger';
-import type { ApiResponse, ChatResponse, Message, ProviderMessage } from '../types';
+import { env } from '../config/env';
+import type { ApiResponse, ChatResponse, Message, MiMoAgent, ProviderMessage } from '../types';
 
 /** POST /api/chat — send a message in a session and receive an assistant reply. */
 export async function sendMessage(
@@ -17,9 +18,10 @@ export async function sendMessage(
   try {
     const sessionId = req.body.sessionId as string;
     const message = req.body.message as string;
-    const mode = req.body.mode as string | undefined;
+    const agent = req.body.agent as MiMoAgent | undefined;
+    const model = req.body.model as string | undefined;
 
-    const result = await chatService.sendMessage(sessionId, message, mode);
+    const result = await chatService.sendMessage(sessionId, message, agent, model);
     const body: ApiResponse<ChatResponse> = { data: result };
     res.status(200).json(body);
   } catch (err) {
@@ -36,7 +38,10 @@ export async function streamMessage(
   try {
     const sessionId = req.body.sessionId as string;
     const userContent = req.body.message as string;
-    const mode = req.body.mode as string | undefined;
+    const agent = req.body.agent as MiMoAgent | undefined;
+    const model = req.body.model as string | undefined;
+
+    logger.info({ sessionId, agent, messageLength: userContent.length }, 'Chat stream request received');
 
     if (!sessionId || !userContent) {
       res.status(400).json({ error: { code: 'invalid_input', message: 'sessionId and message are required' } });
@@ -66,6 +71,9 @@ export async function streamMessage(
     // Send initial event
     res.write(`data: ${JSON.stringify({ type: 'start', timestamp: Date.now() })}\n\n`);
 
+    // Emit mode status so the frontend knows what mode is active
+    res.write(`data: ${JSON.stringify({ type: 'status', agent: agent || 'chat', timestamp: Date.now() })}\n\n`);
+
     // Build conversation history (trim first, then prepend context injection)
     const history = messageRepository.findHistoryBySessionId(sessionId);
     const trimmedHistory = history.slice(-40);
@@ -75,8 +83,14 @@ export async function streamMessage(
       { role: 'user', content: userContent },
     ];
 
-    // Persist user message
-    messageRepository.create({ sessionId, role: 'user', content: userContent });
+    // Persist the user message ONLY if the frontend hasn't already stored it.
+    // The frontend appends the user message to its local state immediately on
+    // send, and that copy is what we read back via findHistoryBySessionId
+    // above. Re-persisting here duplicated every user turn in the DB.
+    const lastStored = trimmedHistory[trimmedHistory.length - 1];
+    if (!lastStored || lastStored.role !== 'user' || lastStored.content !== userContent) {
+      messageRepository.create({ sessionId, role: 'user', content: userContent });
+    }
 
     // Get provider and check if it supports streaming
     const provider = getProvider() as any;
@@ -85,17 +99,43 @@ export async function streamMessage(
       // Use streaming provider
       let assistantText = '';
       try {
-        await provider.sendMessageStream(requestHistory, mode, (event: any) => {
+        await provider.sendMessageStream(requestHistory, agent, (event: any) => {
+          // Debug log all events
+          if (env.mimoDebug) {
+            logger.debug({ type: event.type, sessionID: event.sessionID }, '[MiMo Event]');
+          }
+
+          // Log question events specifically
+          if (event?.type === 'question.asked') {
+            logger.info({ questionID: event.properties?.id, sessionID: event.sessionID }, 'Question asked by MiMo');
+          }
+
           // Accumulate the assistant reply as it streams so we can persist it
           // once the stream ends — mirroring how the frontend builds the
           // visible message (text parts, plus any raw passthrough output).
+          //
+          // MiMo serve echoes the user prompt at the start of its response
+          // text (e.g. user sends "hi", response starts with "hiHi! ...").
+          // Strip the echoed prefix so it doesn't appear in the UI or DB.
           if (event?.type === 'text' && event.part?.text) {
-            assistantText += event.part.text;
+            let text = event.part.text;
+            if (text.startsWith(userContent)) {
+              text = text.slice(userContent.length).replace(/^\n+/, '');
+              if (text) event = { ...event, part: { ...event.part, text } };
+              else return;
+            }
+            assistantText += text;
           } else if (event?.type === 'raw' && typeof event.text === 'string') {
-            assistantText += event.text;
+            let text = event.text;
+            if (text.startsWith(userContent)) {
+              text = text.slice(userContent.length).replace(/^\n+/, '');
+              if (text) event = { ...event, text };
+              else return;
+            }
+            assistantText += text;
           }
           res.write(`data: ${JSON.stringify(event)}\n\n`);
-        });
+        }, model);
 
         // Persist the assistant reply so it survives a page reload. Without
         // this, only user messages were stored and history looked one-sided.
@@ -121,7 +161,7 @@ export async function streamMessage(
       res.write(`data: ${JSON.stringify({ type: 'state', state: 'thinking', label: 'Analyzing...', timestamp: Date.now() })}\n\n`);
 
       try {
-        const result = await provider.sendMessage(requestHistory, mode);
+        const result = await provider.sendMessage(requestHistory, agent, model);
 
         // Emit text event
         res.write(`data: ${JSON.stringify({ type: 'text', text: result.content, timestamp: Date.now() })}\n\n`);

@@ -32,6 +32,10 @@ export interface EnvConfig {
   memoryModel: string;
   memoryDebounceMs: number;
   memoryWindowSize: number;
+  mimoDebug: boolean;
+  // mimo serve config
+  mimoServePort: number;
+  mimoServerPassword: string;
 }
 
 function loadEnv(): EnvConfig {
@@ -50,6 +54,9 @@ function loadEnv(): EnvConfig {
   const memoryModel = process.env.MEMORY_MODEL ?? '';
   const memoryDebounceMs = parseInt(process.env.MEMORY_DEBOUNCE_MS ?? '8000', 10);
   const memoryWindowSize = parseInt(process.env.MEMORY_WINDOW_SIZE ?? '12', 10);
+  const mimoDebug = process.env.MIMO_DEBUG === 'true';
+  const mimoServePort = parseInt(process.env.MIMO_SERVE_PORT ?? '0', 10);
+  const mimoServerPassword = process.env.MIMO_SERVER_PASSWORD ?? '';
 
   return {
     port,
@@ -66,6 +73,9 @@ function loadEnv(): EnvConfig {
     memoryModel,
     memoryDebounceMs,
     memoryWindowSize,
+    mimoDebug,
+    mimoServePort,
+    mimoServerPassword,
   };
 }
 

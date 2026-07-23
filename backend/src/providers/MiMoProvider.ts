@@ -12,19 +12,6 @@ import { URL } from 'node:url';
 
 const SYSTEM_PROMPT = `You are MiMo, a helpful and accurate AI assistant. Keep answers concise and relevant. Always return valid JSON-safe text.`;
 
-function getSystemPrompt(mode?: string): string {
-  switch (mode) {
-    case 'plan':
-      return 'You are MiMo in Plan mode. Think step-by-step and provide a structured plan. Do NOT use any tools or execute commands. Just reason through the problem and present your analysis and plan in plain text.';
-    case 'agent':
-      return 'You are MiMo in Agent mode. You have full access to tools. Execute commands, read/write files, and complete tasks autonomously.';
-    case 'direct':
-    case 'chat':
-    default:
-      return SYSTEM_PROMPT;
-  }
-}
-
 function postJson(url: string, headers: Record<string, string>, body: unknown): Promise<{ status: number; bodyText: string; json: unknown }> {
   const parsedUrl = new URL(url);
   const requestFn = parsedUrl.protocol === 'https:' ? httpsRequest : httpRequest;
@@ -70,7 +57,7 @@ function postJson(url: string, headers: Record<string, string>, body: unknown): 
 export class MiMoProvider implements AIProvider {
   readonly name = 'mimo';
 
-  async sendMessage(messages: ProviderMessage[], mode?: string): Promise<ProviderResult> {
+  async sendMessage(messages: ProviderMessage[], agent?: string): Promise<ProviderResult> {
     if (messages.length === 0) {
       throw new Error('MiMoProvider requires at least one message');
     }
@@ -83,12 +70,12 @@ export class MiMoProvider implements AIProvider {
     const url = `${env.mimoBaseUrl.replace(/\/$/, '')}/chat/completions`;
     const keyPrefix = apiKey.substring(0, 8) + '...';
 
-    logger.info({ url, model: env.mimoModel, keyPrefix }, 'MiMoProvider connecting');
+    logger.info({ url, model: env.mimoModel, keyPrefix, agent }, 'MiMoProvider connecting');
 
     const payload = {
       model: env.mimoModel,
       messages: [
-        { role: 'system', content: getSystemPrompt(mode) },
+        { role: 'system', content: SYSTEM_PROMPT },
         ...messages.map((message) => ({
           role: message.role,
           content: message.content,
@@ -98,7 +85,7 @@ export class MiMoProvider implements AIProvider {
       max_tokens: 2048,
     } as const;
 
-    logger.debug({ messageCount: messages.length, mode, model: env.mimoModel }, 'MiMoProvider sending request');
+    logger.debug({ messageCount: messages.length, agent, model: env.mimoModel }, 'MiMoProvider sending request');
 
     let response;
     try {

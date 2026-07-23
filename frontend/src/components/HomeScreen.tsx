@@ -9,7 +9,7 @@ import {
   Terminal,
   Plus,
 } from "lucide-react";
-import { OrbState, ActiveView, Goal, InteractionMode } from "../types";
+import { OrbState, ActiveView, Goal, AgentName } from "../types";
 import { translations } from "../utils/translations";
 import Orb from "./Orb";
 
@@ -21,8 +21,8 @@ interface HomeScreenProps {
   activeGoals: Goal[];
   language: "en" | "fa";
   setLanguage: (lang: "en" | "fa") => void;
-  interactionMode: InteractionMode;
-  setInteractionMode: (mode: InteractionMode) => void;
+  agent: AgentName;
+  setAgent: (agent: AgentName) => void;
 }
 
 export default function HomeScreen({
@@ -33,8 +33,8 @@ export default function HomeScreen({
   activeGoals,
   language,
   setLanguage,
-  interactionMode,
-  setInteractionMode,
+  agent,
+  setAgent,
 }: HomeScreenProps) {
   const [prompt, setPrompt] = useState("");
   const [isListening, setIsListening] = useState(false);
@@ -207,30 +207,30 @@ export default function HomeScreen({
         <div className="flex items-center gap-1.5 mb-2.5 px-1 overflow-x-auto scrollbar-none">
           {[
             {
-              mode: InteractionMode.Direct,
-              label: t.modeDirect,
-              desc: t.modeDirectDesc,
+              agent: "build" as AgentName,
+              label: language === "fa" ? "ساخت" : "Build",
+              desc: language === "fa" ? "گفتگوی سریع و ساخت" : "Quick build and chat",
               activeColor: "bg-neural-cyan/10 border-neural-cyan/40 text-neural-cyan shadow-[0_0_15px_rgba(93,247,255,0.15)]",
             },
             {
-              mode: InteractionMode.Plan,
-              label: t.modePlan,
-              desc: t.modePlanDesc,
+              agent: "plan" as AgentName,
+              label: language === "fa" ? "برنامه" : "Plan",
+              desc: language === "fa" ? "برنامه‌ریزی و تحلیل" : "Planning and analysis",
               activeColor: "bg-purple-400/10 border-purple-400/40 text-purple-400 shadow-[0_0_15px_rgba(192,132,252,0.15)]",
             },
             {
-              mode: InteractionMode.Agent,
-              label: t.modeAgent,
-              desc: t.modeAgentDesc,
+              agent: "compose" as AgentName,
+              label: language === "fa" ? "ترکیب" : "Compose",
+              desc: language === "fa" ? "ترکیب و ایجاد" : "Compose and create",
               activeColor: "bg-blue-400/10 border-blue-400/40 text-blue-400 shadow-[0_0_15px_rgba(96,165,250,0.15)]",
             },
           ].map((item) => (
             <button
-              key={item.mode}
+              key={item.agent}
               type="button"
-              onClick={() => setInteractionMode(item.mode)}
+              onClick={() => setAgent(item.agent)}
               className={`flex-1 min-w-[120px] p-2.5 rounded-xl text-left border transition-all duration-300 backdrop-blur-md flex flex-col gap-0.5 cursor-pointer ${
-                interactionMode === item.mode
+                agent === item.agent
                   ? item.activeColor
                   : "bg-white/[0.02] border-white/5 text-titanium/50 hover:border-white/10 hover:bg-white/[0.04]"
               }`}

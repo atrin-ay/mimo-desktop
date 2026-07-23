@@ -2,6 +2,7 @@ import type { AIProvider } from './AIProvider';
 import { MockProvider } from './MockProvider';
 import { MiMoProvider } from './MiMoProvider';
 import { MimoCliProvider } from './MimoCliProvider';
+import { MimoServeProvider } from './MimoServeProvider';
 import { env } from '../config/env';
 import { logger } from '../config/logger';
 
@@ -14,6 +15,7 @@ const providers: Record<string, () => AIProvider> = {
   mock: () => new MockProvider(),
   mimo: () => new MiMoProvider(),
   'mimo-cli': () => new MimoCliProvider(),
+  'mimo-serve': () => new MimoServeProvider(),
 };
 
 let cachedProvider: AIProvider | null = null;
@@ -25,12 +27,12 @@ export function getProvider(): AIProvider {
 
   let name = env.aiProvider;
 
-  // Auto-detect: prefer mimo-cli if available, then mimo with API key, else mock
+  // Auto-detect: prefer mimo-serve (supports questions), then mimo-cli, then mimo with API key, else mock
   if (name === 'mock') {
     if (env.mimoApiKey) {
       name = 'mimo';
     } else {
-      name = 'mimo-cli';
+      name = 'mimo-serve';
     }
   }
 

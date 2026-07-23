@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   OrbState,
-  InteractionMode,
+  AgentName,
   Subject,
   Message,
   ActivityEntry,
@@ -14,6 +14,10 @@ import {
   listSessions,
   streamChat,
   deleteSession,
+  listModels,
+  getCurrentModel,
+  setCurrentModel,
+  ModelInfo,
 } from "../api";
 
 const isUuid = (value: string) =>
@@ -26,6 +30,15 @@ const TOOL_ICONS: Record<string, { icon: string; label: string; color: string }>
   edit: { icon: "✏️", label: "Editing file", color: "#fbbf24" },
   glob: { icon: "🔍", label: "Searching files", color: "#38bdf8" },
   grep: { icon: "🔍", label: "Searching content", color: "#38bdf8" },
+};
+
+/** Maps frontend-friendly event types to display info */
+const EVENT_ICONS: Record<string, { icon: string; label: string; color: string }> = {
+  command: { icon: "💻", label: "Running command", color: "#a78bfa" },
+  file_read: { icon: "📂", label: "Reading file", color: "#60a5fa" },
+  file_change: { icon: "📝", label: "Editing file", color: "#34d399" },
+  file_search: { icon: "🔍", label: "Searching files", color: "#38bdf8" },
+  tool_call: { icon: "⚙️", label: "Using tool", color: "#94a3b8" },
 };
 
 const STATE_ICONS: Record<string, string> = {
@@ -57,10 +70,14 @@ export interface UseChatReturn {
   isLoading: boolean;
   backendError: string | null;
   activityLog: ActivityEntry[];
-  interactionMode: InteractionMode;
+  agent: AgentName;
+  setAgent: (agent: AgentName) => void;
+  model: string;
+  setModel: (model: string) => void;
+  models: ModelInfo[];
+  modelsLoading: boolean;
 
   setOrbState: (s: OrbState) => void;
-  setInteractionMode: (m: InteractionMode) => void;
   setActiveSubjectId: (id: string) => void;
   setSessionId: (id: string | null) => void;
   setSubjects: React.Dispatch<React.SetStateAction<Subject[]>>;
@@ -91,11 +108,47 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [activityLog, setActivityLog] = useState<ActivityEntry[]>([]);
-  const [interactionMode, setInteractionMode] = useState<InteractionMode>(
-    InteractionMode.Direct
-  );
+  const [agent, setAgent] = useState<AgentName>('build');
+  const [model, setModelState] = useState<string>('mimo/mimo-auto');
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(true);
 
   const abortRef = useRef<AbortController | null>(null);
+
+  // --- Load models on mount ---
+  useEffect(() => {
+    const loadModels = async () => {
+      try {
+        const [modelsList, currentModelId] = await Promise.all([
+          listModels(),
+          getCurrentModel(),
+        ]);
+        setModels(modelsList);
+        setModelState(currentModelId);
+      } catch {
+        // Fallback to default models
+        setModels([
+          { id: 'mimo/mimo-auto', name: 'Auto', description: 'Automatically select the best model' },
+          { id: 'xiaomi/mimo-v2.5', name: 'MiMo v2.5', description: 'Standard MiMo v2.5 model' },
+          { id: 'xiaomi/mimo-v2.5-pro', name: 'MiMo v2.5 Pro', description: 'Advanced MiMo v2.5 Pro model' },
+          { id: 'xiaomi/mimo-v2.5-pro-ultraspeed', name: 'MiMo v2.5 Pro UltraSpeed', description: 'Ultra-fast MiMo v2.5 Pro model' },
+        ]);
+      } finally {
+        setModelsLoading(false);
+      }
+    };
+    loadModels();
+  }, []);
+
+  // --- Model setter that also persists to backend ---
+  const setModel = useCallback(async (newModel: string) => {
+    setModelState(newModel);
+    try {
+      await setCurrentModel(newModel);
+    } catch {
+      // Backend persistence failed, but local state is set
+    }
+  }, []);
 
   const activeSubject = subjects.find((s) => s.id === activeSubjectId) || subjects[0];
   const messages = activeSubject ? activeSubject.messages : [];
@@ -327,7 +380,7 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
           events: [],
           artifacts: [],
           reasoning: "",
-          mode: interactionMode,
+          mode: agent,
         };
 
         setSubjects((prev) =>
@@ -376,8 +429,10 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
           )
         );
 
+        console.log(`[MiMo] Sending message in ${agent} mode`);
+
         try {
-          for await (const event of streamChat(currentSessionId, cmd, interactionMode, abortRef.current?.signal)) {
+          for await (const event of streamChat(currentSessionId, cmd, agent, abortRef.current?.signal, model)) {
             switch (event.type) {
               case "step_start": {
                 const aid = addGlobalActivity({
@@ -499,6 +554,127 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
                 break;
               }
 
+              // ── Frontend-friendly event types from MimoCliProvider ──────
+
+              case "status": {
+                const statusAgent = event.agent || "build";
+                if (statusAgent === "build") {
+                  setOrbState(OrbState.Executing);
+                } else if (statusAgent === "plan") {
+                  setOrbState(OrbState.Thinking);
+                } else if (statusAgent === "compose") {
+                  setOrbState(OrbState.Thinking);
+                } else {
+                  setOrbState(OrbState.Streaming);
+                }
+                break;
+              }
+
+              case "command": {
+                const cmdDetail = event.detail || "";
+                const cmdStatus: "running" | "completed" | "error" =
+                  event.status === "completed" ? "completed" : "running";
+
+                const cmdEv = createActivityEntry({
+                  type: "tool",
+                  toolName: "bash",
+                  label: "Running command",
+                  detail: cmdDetail,
+                  icon: "💻",
+                  iconColor: "#a78bfa",
+                  status: cmdStatus,
+                });
+                perMessageEvents.push(cmdEv);
+                updateMessage({ events: [...perMessageEvents] });
+                setOrbState(OrbState.Executing);
+                break;
+              }
+
+              case "file_change": {
+                const fileDetail = event.detail || "";
+                const fileStatus: "running" | "completed" | "error" =
+                  event.status === "completed" ? "completed" : "running";
+
+                const fileEv = createActivityEntry({
+                  type: "tool",
+                  toolName: event.tool || "edit",
+                  label: "Editing file",
+                  detail: fileDetail,
+                  icon: "📝",
+                  iconColor: "#34d399",
+                  status: fileStatus,
+                });
+                perMessageEvents.push(fileEv);
+                updateMessage({ events: [...perMessageEvents] });
+
+                // Artifact detection for completed file writes
+                if (fileStatus === "completed" && fileDetail) {
+                  const ext = fileDetail.split(".").pop()?.toLowerCase() || "";
+                  const artifactType: Artifact["type"] =
+                    ["png", "jpg", "jpeg", "gif", "svg", "webp"].includes(ext)
+                      ? "image"
+                      : ["js", "ts", "tsx", "jsx", "py", "rs", "go", "java", "cpp", "c", "rb", "php", "vue", "svelte"].includes(ext)
+                      ? "code"
+                      : "file";
+
+                  perMessageArtifacts.push({
+                    id: `art_${Date.now()}`,
+                    type: artifactType,
+                    name: fileDetail,
+                    language: ext,
+                  });
+                }
+
+                setOrbState(OrbState.Executing);
+                break;
+              }
+
+              case "file_read": {
+                const readEv = createActivityEntry({
+                  type: "tool",
+                  toolName: "read",
+                  label: "Reading file",
+                  detail: event.detail || "",
+                  icon: "📂",
+                  iconColor: "#60a5fa",
+                  status: event.status === "completed" ? "completed" : "running",
+                });
+                perMessageEvents.push(readEv);
+                updateMessage({ events: [...perMessageEvents] });
+                break;
+              }
+
+              case "file_search": {
+                const searchEv = createActivityEntry({
+                  type: "tool",
+                  toolName: "glob",
+                  label: "Searching files",
+                  detail: event.detail || "",
+                  icon: "🔍",
+                  iconColor: "#38bdf8",
+                  status: event.status === "completed" ? "completed" : "running",
+                });
+                perMessageEvents.push(searchEv);
+                updateMessage({ events: [...perMessageEvents] });
+                break;
+              }
+
+              case "tool_call": {
+                const tcInfo = EVENT_ICONS[event.tool] || EVENT_ICONS.tool_call;
+                const tcEv = createActivityEntry({
+                  type: "tool",
+                  toolName: event.tool || "unknown",
+                  label: tcInfo.label,
+                  detail: event.detail || "",
+                  icon: tcInfo.icon,
+                  iconColor: tcInfo.color,
+                  status: event.status === "completed" ? "completed" : "running",
+                });
+                perMessageEvents.push(tcEv);
+                updateMessage({ events: [...perMessageEvents] });
+                break;
+              }
+
               case "reasoning": {
                 if (event.part?.text) {
                   reasoningText += event.part.text;
@@ -584,10 +760,32 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
               }
 
               case "question": {
-                // MiMo is asking a question — show as interactive card with options
+                // MiMo is asking a question
+                console.log('[QUESTION EVENT RECEIVED]', {
+                  type: event.type,
+                  id: event.properties?.id || event.id,
+                  optionsCount: (event.properties?.questions?.[0]?.options || []).length,
+                  question: event.properties?.questions?.[0]?.question,
+                });
                 const questionText = event.part?.text || event.text || event.message || "";
                 const questionOptions = event.part?.options || (event as any).options || [];
-                if (questionText) {
+                const requestID = event.properties?.id || event.id || event.requestID;
+
+                // Format options as strings if they are objects
+                const formattedOptions = Array.isArray(questionOptions)
+                  ? questionOptions.map((opt: any) =>
+                      typeof opt === 'string' ? opt : (opt.label || opt.name || String(opt))
+                    )
+                  : [];
+
+                // Only create a question message if there are structured options (2+)
+                // Open-ended questions (no options) are handled as normal chat —
+                // the user answers via the main chat input
+                if (formattedOptions.length >= 2 && questionText) {
+                  const questionHeader = event.properties?.questions?.[0]?.header || "";
+                  const questionMultiple = event.properties?.questions?.[0]?.multiple || false;
+                  const questionCustom = event.properties?.questions?.[0]?.custom !== false;
+
                   const questionMsg: Message = {
                     id: `question_${Date.now()}`,
                     sender: "system",
@@ -599,7 +797,11 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
                     events: [],
                     artifacts: [],
                     isQuestion: true,
-                    questionOptions: Array.isArray(questionOptions) ? questionOptions : [],
+                    questionOptions: formattedOptions,
+                    questionRequestID: requestID,
+                    questionHeader,
+                    questionMultiple,
+                    questionCustom,
                   };
                   setSubjects((prev) =>
                     prev.map((s) =>
@@ -609,6 +811,8 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
                     )
                   );
                 }
+                // If no structured options, the question text is already in the
+                // agent's text response — user answers via normal chat input.
                 break;
               }
 
@@ -639,7 +843,8 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
               const response = await sendMessage(
                 currentSessionId,
                 cmd,
-                interactionMode
+                agent,
+                model
               );
               agentText = response.message.content;
             } catch {
@@ -697,7 +902,8 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
       sessionId,
       activeSubjectId,
       language,
-      interactionMode,
+      agent,
+      model,
       setSubjects,
       setSessionId,
       setOrbState,
@@ -773,10 +979,48 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
 
   // --- Handle answer to a question ---
   const handleAnswer = useCallback(
-    (answer: string) => {
-      handleExecuteCommand(answer);
+    async (answer: string) => {
+      // Find the pending question in the current session's messages
+      const currentSubject = subjects.find(s => s.id === activeSubjectId);
+      const pendingQuestion = currentSubject?.messages.find(
+        m => m.isQuestion && m.questionRequestID && !m.questionAnswered
+      );
+
+      if (pendingQuestion?.questionRequestID) {
+        // Send answer via HTTP reply endpoint
+        try {
+          const { replyToQuestion } = await import("../api");
+          await replyToQuestion(pendingQuestion.questionRequestID, [[answer]]);
+
+          // Mark the question as answered in the UI
+          setSubjects((prev) =>
+            prev.map((s) =>
+              s.id === activeSubjectId
+                ? {
+                    ...s,
+                    messages: s.messages.map((m) =>
+                      m.id === pendingQuestion.id
+                        ? { ...m, questionAnswered: true, text: `${m.text}\n\n> ${answer}` }
+                        : m
+                    ),
+                  }
+                : s
+            )
+          );
+
+          // Add the answer as a user message for display
+          handleExecuteCommand(answer);
+        } catch (err) {
+          console.error("Failed to reply to question:", err);
+          // Fallback: send as regular message
+          handleExecuteCommand(answer);
+        }
+      } else {
+        // No pending question — send as regular message
+        handleExecuteCommand(answer);
+      }
     },
-    [handleExecuteCommand]
+    [subjects, activeSubjectId, handleExecuteCommand, setSubjects]
   );
 
   const stopGeneration = useCallback(() => {
@@ -794,9 +1038,13 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
     isLoading,
     backendError,
     activityLog,
-    interactionMode,
+    agent,
+    model,
+    models,
+    modelsLoading,
     setOrbState,
-    setInteractionMode,
+    setAgent,
+    setModel,
     setActiveSubjectId,
     setSessionId,
     setSubjects,

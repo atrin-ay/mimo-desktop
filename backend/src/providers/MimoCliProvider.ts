@@ -4,12 +4,19 @@ import type {
   ProviderHealth,
   ProviderMessage,
   ProviderResult,
+  MiMoAgent,
 } from '../types';
 import { logger } from '../config/logger';
+import { env } from '../config/env';
 import * as fs from 'fs';
 import * as path from 'path';
 
-// ─── MiMo CLI response types ────────────────────────────────────────────────
+// ─── Valid agents ────────────────────────────────────────────────────────────
+
+const VALID_AGENTS = new Set<string>(['build', 'plan', 'compose']);
+const DEFAULT_AGENT: MiMoAgent = 'build';
+
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface CliSessionInfo {
   id: string;
@@ -67,7 +74,6 @@ export interface CliConfig {
 function findMimoBinary(): string {
   const candidates: string[] = [];
 
-  // Find actual mimo.exe from npm global
   try {
     const npmGlobalDir = path.join(process.env.APPDATA || '', 'npm', 'node_modules', '@mimo-ai');
     if (fs.existsSync(npmGlobalDir)) {
@@ -89,7 +95,6 @@ function findMimoBinary(): string {
     }
   } catch {}
 
-  // Check NVM paths for mimo.exe
   try {
     const nvmDir = process.env.NVM_SYMLINK || path.join(process.env.APPDATA || '', 'nvm');
     if (fs.existsSync(nvmDir)) {
@@ -100,7 +105,6 @@ function findMimoBinary(): string {
     }
   } catch {}
 
-  // Check npm global root
   try {
     const npmRoot = execFileSync('npm', ['root', '-g'], { encoding: 'utf-8', timeout: 5000 }).trim();
     candidates.push(path.join(npmRoot, '@mimo-ai', 'cli', 'node_modules', '@mimo-ai', 'mimocode-windows-x64', 'bin', 'mimo.exe'));
@@ -115,11 +119,10 @@ function findMimoBinary(): string {
     } catch {}
   }
 
-  // Fall back to 'mimo' on PATH (will use shell)
   return 'mimo';
 }
 
-// ─── Common CLI environment ──────────────────────────────────────────────────
+// ─── CLI helpers ─────────────────────────────────────────────────────────────
 
 function cliEnv(): NodeJS.ProcessEnv {
   return {
@@ -135,9 +138,6 @@ function cliCwd(): string {
   return process.env.USERPROFILE || process.env.HOME || '.';
 }
 
-// ─── CLI execution helpers ───────────────────────────────────────────────────
-
-/** Spawn a MiMo CLI command and collect stdout/stderr. Resolves with { stdout, stderr, code }. */
 function execCli(
   binary: string,
   args: string[],
@@ -174,20 +174,36 @@ function execCli(
   });
 }
 
-/** Parse JSON from CLI stdout, returning null on failure. */
 function parseJsonOutput(stdout: string): unknown {
   const trimmed = stdout.trim();
   if (!trimmed) return null;
   try {
     return JSON.parse(trimmed);
   } catch {
-    // Try to find JSON in the output (MiMo sometimes prints non-JSON before JSON)
     const jsonMatch = trimmed.match(/\{[\s\S]*\}/) || trimmed.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
       try { return JSON.parse(jsonMatch[0]); } catch {}
     }
     return null;
   }
+}
+
+function parseCliOutput(stdout: string): any[] {
+  const events: any[] = [];
+  const lines = stdout.split('\n').filter(l => l.trim());
+  for (const line of lines) {
+    try {
+      events.push(JSON.parse(line.trim()));
+    } catch {}
+  }
+  return events;
+}
+
+// ─── Debug logging ───────────────────────────────────────────────────────────
+
+function debugLog(category: string, data: Record<string, unknown>) {
+  if (!env.mimoDebug) return;
+  logger.debug(data, `[MiMo Debug] ${category}`);
 }
 
 // ─── Provider implementation ─────────────────────────────────────────────────
@@ -203,27 +219,35 @@ export class MimoCliProvider implements AIProvider {
 
   // ── AIProvider interface ─────────────────────────────────────────────────
 
-  async sendMessage(messages: ProviderMessage[], mode?: string): Promise<ProviderResult> {
+  async sendMessage(messages: ProviderMessage[], agent?: MiMoAgent, model?: string): Promise<ProviderResult> {
     if (messages.length === 0) {
       throw new Error('MimoCliProvider requires at least one message');
     }
 
-    const prompt = this.buildPrompt(messages, mode);
-    logger.info({ messageCount: messages.length, mode }, 'MimoCliProvider sending request');
+    const resolvedAgent = this.resolveAgent(agent);
+    const prompt = this.buildPrompt(messages);
+    const args = this.buildCliArgs(resolvedAgent, prompt, model);
 
-    const { stdout, stderr, code } = await execCli(this.binary, ['run', '--format', 'json', prompt]);
+    const startTime = Date.now();
+    debugLog('sendMessage', { agent: resolvedAgent, messageCount: messages.length, args: [this.binary, ...args] });
 
-    const events = this.parseCliOutput(stdout);
+    const { stdout, stderr, code } = await execCli(this.binary, args);
+
+    const events = parseCliOutput(stdout);
     const lastTextEvent = events.filter((e: any) => e.type === 'text').pop();
     const content = lastTextEvent?.part?.text || '';
+    const duration = Date.now() - startTime;
+
+    debugLog('response', { agent: resolvedAgent, eventsCount: events.length, contentLength: content.length, duration, exitCode: code });
 
     if (content) {
-      logger.info({ eventsCount: events.length, contentLength: content.length }, 'MimoCliProvider response received');
       return {
         content,
         metadata: {
           provider: this.name,
+          agent: resolvedAgent,
           eventsCount: events.length,
+          duration,
         },
       };
     }
@@ -234,18 +258,33 @@ export class MimoCliProvider implements AIProvider {
 
   async sendMessageStream(
     messages: ProviderMessage[],
-    mode: string | undefined,
+    agent: MiMoAgent | undefined,
     onEvent: (event: any) => void,
+    model?: string,
   ): Promise<void> {
     if (messages.length === 0) {
       throw new Error('MimoCliProvider requires at least one message');
     }
 
-    const prompt = this.buildPrompt(messages, mode);
-    logger.info({ messageCount: messages.length, mode }, 'MimoCliProvider streaming request');
+    const resolvedAgent = this.resolveAgent(agent);
+    const prompt = this.buildPrompt(messages);
+    const args = this.buildCliArgs(resolvedAgent, prompt, model);
+
+    // TEMPORARY DEBUG — log full spawn command
+    console.log('[MimoCliProvider DEBUG] Spawning:', this.binary, args.join(' '));
+
+    const startTime = Date.now();
+    debugLog('sendMessageStream', { agent: resolvedAgent, messageCount: messages.length, fullCommand: [this.binary, ...args].join(' ') });
+
+    // Emit agent status so frontend knows what's active
+    onEvent({
+      type: 'status',
+      agent: resolvedAgent,
+      timestamp: Date.now(),
+    });
 
     return new Promise((resolve, reject) => {
-      const proc = spawn(this.binary, ['run', '--format', 'json', prompt], {
+      const proc = spawn(this.binary, args, {
         cwd: cliCwd(),
         shell: false,
         env: cliEnv(),
@@ -258,7 +297,6 @@ export class MimoCliProvider implements AIProvider {
       proc.stdout?.on('data', (data: Buffer) => {
         stdoutBuffer += data.toString('utf-8');
 
-        // Process complete JSON lines
         const lines = stdoutBuffer.split('\n');
         stdoutBuffer = lines.pop() || '';
 
@@ -267,9 +305,9 @@ export class MimoCliProvider implements AIProvider {
           if (!trimmed) continue;
           try {
             const event = JSON.parse(trimmed);
+            debugLog('raw_event', { type: event.type, tool: event.part?.tool });
             onEvent(event);
           } catch {
-            // Non-JSON line, emit as raw
             onEvent({ type: 'raw', text: trimmed, timestamp: Date.now() });
           }
         }
@@ -283,7 +321,6 @@ export class MimoCliProvider implements AIProvider {
       });
 
       proc.on('close', (code) => {
-        // Flush remaining buffer
         if (stdoutBuffer.trim()) {
           try {
             onEvent(JSON.parse(stdoutBuffer.trim()));
@@ -291,6 +328,9 @@ export class MimoCliProvider implements AIProvider {
             onEvent({ type: 'raw', text: stdoutBuffer.trim(), timestamp: Date.now() });
           }
         }
+
+        const duration = Date.now() - startTime;
+        debugLog('stream_complete', { agent: resolvedAgent, duration, exitCode: code });
 
         if (code !== 0 && code !== null) {
           reject(new Error(`MiMo CLI exited with code ${code}`));
@@ -332,7 +372,7 @@ export class MimoCliProvider implements AIProvider {
     }
   }
 
-  // ── Session management (delegates to MiMo CLI) ──────────────────────────
+  // ── Session management ───────────────────────────────────────────────────
 
   async listSessions(): Promise<CliSessionInfo[]> {
     const { stdout } = await execCli(this.binary, ['session', 'list', '--format', 'json']);
@@ -363,53 +403,70 @@ export class MimoCliProvider implements AIProvider {
 
   // ── MiMo CLI native capabilities ────────────────────────────────────────
 
-  /** Get MiMo CLI version. */
   async getVersion(): Promise<string> {
     const { stdout } = await execCli(this.binary, ['--version']);
     return stdout.trim();
   }
 
-  /** Get MiMo CLI configuration/status. */
   async getConfig(): Promise<CliConfig> {
     const { stdout } = await execCli(this.binary, ['config', '--json']);
     const parsed = parseJsonOutput(stdout);
     return (parsed as CliConfig) || {};
   }
 
-  /** Run an arbitrary MiMo CLI command and return raw output. */
   async runCommand(args: string[]): Promise<{ stdout: string; stderr: string; code: number | null }> {
     return execCli(this.binary, args);
   }
 
   // ── Internal helpers ─────────────────────────────────────────────────────
 
-  private buildPrompt(messages: ProviderMessage[], mode?: string): string {
+  private resolveAgent(agent?: string): MiMoAgent {
+    if (agent && VALID_AGENTS.has(agent)) {
+      return agent as MiMoAgent;
+    }
+    if (agent && !VALID_AGENTS.has(agent)) {
+      throw new Error(`Unknown MiMo agent: "${agent}". Valid agents: ${[...VALID_AGENTS].join(', ')}`);
+    }
+    return DEFAULT_AGENT;
+  }
+
+  private buildCliArgs(agent: MiMoAgent, message: string, model?: string): string[] {
+    const args = ['run', '--format', 'json', '--agent', agent];
+    if (model) {
+      args.push('--model', model);
+    }
+    args.push(message);
+
+    // TEMPORARY DEBUG LOGGING — verify model reaches CLI
+    console.log('[MimoCliProvider DEBUG] Full CLI args:', JSON.stringify([this.binary, ...args]));
+    console.log('[MimoCliProvider DEBUG] Model argument:', model || '(none)');
+
+    return args;
+  }
+
+  private buildPrompt(messages: ProviderMessage[]): string {
     const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
     if (!lastUserMsg) {
       throw new Error('No user message found');
     }
 
-    let prompt = lastUserMsg.content;
-    if (messages.length > 1) {
-      const historyParts = messages
-        .filter(m => m !== lastUserMsg)
-        .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`);
-      prompt = historyParts.join('\n') + '\n\nUser: ' + lastUserMsg.content;
+    // Only send the latest user message to the CLI. The CLI maintains its own
+    // session history, so injecting the full transcript here caused it to echo
+    // prior "User: ..." lines back into the assistant response (the user's
+    // message appearing inside the AI answer).
+    //
+    // The one exception is the project-context injection, a synthetic `user`
+    // message wrapped in [Project Context]...[/Project Context] tags. It carries
+    // memory/brain context the CLI cannot recover from its own session history,
+    // so we prepend it to the latest message instead of dropping it.
+    const contextInjection = messages.find(
+      (m) => m.role === 'user' && m.content.includes('[Project Context]'),
+    );
+
+    if (contextInjection) {
+      return `${contextInjection.content}\n\n${lastUserMsg.content}`;
     }
 
-    return prompt;
-  }
-
-  private parseCliOutput(stdout: string): any[] {
-    const events: any[] = [];
-    const lines = stdout.split('\n').filter(l => l.trim());
-    for (const line of lines) {
-      try {
-        events.push(JSON.parse(line.trim()));
-      } catch {
-        // non-JSON output, ignore
-      }
-    }
-    return events;
+    return lastUserMsg.content;
   }
 }

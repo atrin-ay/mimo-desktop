@@ -11,11 +11,8 @@ export enum OrbState {
   Streaming = "Streaming",
 }
 
-export enum InteractionMode {
-  Direct = "direct",
-  Plan = "plan",
-  Agent = "agent"
-}
+/** Official MiMo agent names — maps directly to `mimo run --agent <name>` */
+export type AgentName = 'build' | 'plan' | 'compose';
 
 export enum ActiveView {
   Home = "Home",
@@ -42,6 +39,11 @@ export interface Message {
   mode?: string;
   isQuestion?: boolean;
   questionOptions?: string[];
+  questionRequestID?: string;
+  questionHeader?: string;
+  questionMultiple?: boolean;
+  questionCustom?: boolean;
+  questionAnswered?: boolean;
 }
 
 export interface Artifact {

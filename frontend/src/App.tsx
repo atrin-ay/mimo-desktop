@@ -16,10 +16,7 @@ import {
   Home,
   Menu,
   X,
-  Bell,
-  Clock,
   Power,
-  Sparkles,
   ChevronLeft,
   ChevronRight,
   Plus,
@@ -33,7 +30,6 @@ import {
 
 export default function App() {
   const [activeView, setActiveView] = useState<ActiveView>(ActiveView.Home);
-  const [currentTime, setCurrentTime] = useState("");
   const [notifications, setNotifications] = useState<string[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [language, setLanguage] = useState<"en" | "fa">("en");
@@ -47,24 +43,6 @@ export default function App() {
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
       value
     );
-
-  // Dynamic clock
-  useEffect(() => {
-    const updateTime = () => {
-      const date = new Date();
-      const options: Intl.DateTimeFormatOptions = {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: false,
-        timeZoneName: "short",
-      };
-      setCurrentTime(date.toLocaleTimeString("en-US", options));
-    };
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
-    return () => clearInterval(interval);
-  }, []);
 
   const triggerNotification = (text: string) => {
     setNotifications((prev) => [text, ...prev].slice(0, 5));
@@ -361,56 +339,8 @@ export default function App() {
               )}
               <span>{theme === "dark" ? "Light Theme" : "Dark Theme"}</span>
             </button>
-            <div className="hidden sm:flex items-center gap-2 text-xs font-mono text-titanium/60 bg-white/3 px-3 py-1.5 border border-white/5 rounded-xl">
-              <Clock size={12} className="text-neural-cyan" />
-              <span>{currentTime || "00:00:00 UTC"}</span>
-            </div>
-            <div className="relative">
-              <button
-                className="w-9 h-9 bg-white/3 border border-white/5 rounded-xl flex items-center justify-center text-titanium/50 hover:text-white transition-all hover:bg-white/5 relative"
-                title="System Notifications"
-              >
-                <Bell size={15} />
-                <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-neural-cyan animate-ping" />
-              </button>
-            </div>
-            <div className="flex items-center gap-2 pl-2 border-l border-white/5">
-              <div className="w-8 h-8 rounded-full bg-[#1e1e1e] border border-white/10 flex items-center justify-center text-xs shadow-inner">
-                🧑‍💻
-              </div>
-              <div className="hidden lg:flex flex-col text-left">
-                <span className="text-xs font-medium text-white/90">
-                  Core Architect
-                </span>
-                <span className="text-[9px] text-titanium/45 font-mono">
-                  L3_SECURITY_CLEAR
-                </span>
-              </div>
-            </div>
           </div>
         </header>
-
-        {/* Floating notifications */}
-        <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-3 max-w-sm pointer-events-none">
-          <AnimatePresence>
-            {notifications.map((notif, index) => (
-              <motion.div
-                key={index}
-                initial={{ opacity: 0, y: 30, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                transition={{ duration: 0.4 }}
-                className="p-3.5 bg-black/85 border border-neural-cyan/20 text-xs text-white/90 rounded-xl shadow-xl flex items-center gap-2 backdrop-blur-md"
-              >
-                <Sparkles
-                  size={14}
-                  className="text-neural-cyan shrink-0 animate-pulse"
-                />
-                <span className="font-mono">{notif}</span>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
 
         {/* Screen Switcher */}
         <div className="flex-1 relative">
@@ -453,8 +383,12 @@ export default function App() {
                       orbState={chat.orbState}
                       setOrbState={chat.setOrbState}
                       isLoading={chat.isLoading}
-                      interactionMode={chat.interactionMode}
-                      setInteractionMode={chat.setInteractionMode}
+                      agent={chat.agent}
+                      setAgent={chat.setAgent}
+                      model={chat.model}
+                      setModel={chat.setModel}
+                      models={chat.models}
+                      modelsLoading={chat.modelsLoading}
                       onExecute={chat.handleExecuteCommand}
                       onAnswer={chat.handleAnswer}
                       onStop={chat.stopGeneration}
@@ -471,8 +405,8 @@ export default function App() {
                     activeGoals={[]}
                     language={language}
                     setLanguage={setLanguage}
-                    interactionMode={chat.interactionMode}
-                    setInteractionMode={chat.setInteractionMode}
+                    agent={chat.agent}
+                    setAgent={chat.setAgent}
                   />
                 );
               })()}

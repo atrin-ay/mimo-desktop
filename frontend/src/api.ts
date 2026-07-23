@@ -58,12 +58,13 @@ export async function createSession(id?: string): Promise<ApiSession> {
 export async function sendMessage(
   sessionId: string,
   message: string,
-  mode?: string
+  agent?: string,
+  model?: string,
 ): Promise<ChatResponse> {
   const res = await fetch(`${API_BASE}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, message, mode }),
+    body: JSON.stringify({ sessionId, message, agent, model }),
   });
   if (!res.ok) {
     throw new Error(await parseError(res));
@@ -215,6 +216,44 @@ export async function healthCheck(): Promise<{ status: string }> {
   return res.json();
 }
 
+// ─── Model API ────────────────────────────────────────────────────────────────
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  description?: string;
+  provider?: string;
+}
+
+export async function listModels(): Promise<ModelInfo[]> {
+  const res = await fetch(`${API_BASE}/models`);
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+  const { data } = await res.json();
+  return data || [];
+}
+
+export async function getCurrentModel(): Promise<string> {
+  const res = await fetch(`${API_BASE}/models/current`);
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+  const { data } = await res.json();
+  return data.model;
+}
+
+export async function setCurrentModel(model: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/models/current`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model }),
+  });
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+}
+
 export async function setApiKey(mimoApiKey: string, mimoBaseUrl?: string, mimoModel?: string): Promise<void> {
   const res = await fetch(`${API_BASE}/admin/api-key`, {
     method: 'POST',
@@ -266,18 +305,41 @@ export interface StreamEvent {
   messageId?: string;
   part?: any;
   sessionID?: string;
+  mode?: string;
+  agent?: string;
+  detail?: string;
+  status?: string;
+  reason?: string;
+  originalType?: string;
+  policy?: { allowWrites: boolean; allowShell: boolean };
+  id?: string;
+  requestID?: string;
+  properties?: {
+    id?: string;
+    sessionID?: string;
+    questions?: Array<{
+      question: string;
+      header: string;
+      options: Array<{ label: string; description: string }>;
+      multiple?: boolean;
+      custom?: boolean;
+    }>;
+    tool?: { messageID: string; callID: string };
+  };
+  options?: any[];
 }
 
 export async function* streamChat(
   sessionId: string,
   message: string,
-  mode?: string,
+  agent?: string,
   signal?: AbortSignal,
+  model?: string,
 ): AsyncGenerator<StreamEvent> {
   const response = await fetch(`${API_BASE}/chat/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, message, mode }),
+    body: JSON.stringify({ sessionId, message, agent, model }),
     signal,
   });
 
@@ -311,5 +373,47 @@ export async function* streamChat(
       }
     }
   }
+}
+
+// ─── Question API ────────────────────────────────────────────────────────────
+
+/**
+ * Reply to a MiMo question.
+ * @param requestID The question ID from question.asked event
+ * @param answers Array of answer arrays (one per question in the request)
+ */
+export async function replyToQuestion(requestID: string, answers: string[][]): Promise<void> {
+  const res = await fetch(`${API_BASE}/question/${requestID}/reply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ answers }),
+  });
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+}
+
+/**
+ * Reject a MiMo question.
+ */
+export async function rejectQuestion(requestID: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/question/${requestID}/reject`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+}
+
+/**
+ * List pending MiMo questions.
+ */
+export async function listQuestions(): Promise<any[]> {
+  const res = await fetch(`${API_BASE}/question`);
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+  const { data } = await res.json();
+  return data || [];
 }
 

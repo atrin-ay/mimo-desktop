@@ -1,12 +1,11 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { ChevronDown, ChevronRight, User } from "lucide-react";
 import { Message, OrbState } from "../types";
 import OrbIndicator from "./OrbIndicator";
 import ExecutionTimeline from "./ExecutionTimeline";
 import ArtifactCard from "./ArtifactCard";
-import QuestionCard from "./QuestionCard";
-import { detectQuestion } from "../utils/questionDetector";
+import MultipleChoiceQuestion from "./MultipleChoiceQuestion";
 
 interface ExecutionCardProps {
   message: Message;
@@ -27,30 +26,27 @@ export default function ExecutionCard({ message, language, onAnswer }: Execution
   const isSystem = message.sender === "system";
   const isStreaming = message.status === "streaming";
 
-  // Detect questions from the question event OR from text parsing
-  const detectedQuestion = useMemo(() => {
-    if (message.isQuestion) {
-      return { isQuestion: true, questionText: message.text, options: message.questionOptions || [] };
-    }
-    // Only try to detect from text when the message is fully done
-    if (message.sender === "agent" && message.status === "done" && message.text) {
-      return detectQuestion(message.text);
-    }
-    return null;
-  }, [message.isQuestion, message.text, message.questionOptions, message.sender, message.status]);
+  // Determine if this is a multiple-choice question (structured options only)
+  const hasStructuredOptions =
+    message.isQuestion &&
+    message.questionOptions &&
+    message.questionOptions.length >= 2;
 
   // System messages
   if (isSystem) {
-    if (message.isQuestion) {
+    // Multiple-choice question → render as interactive options
+    if (hasStructuredOptions) {
       return (
-        <QuestionCard
-          text={message.text}
-          options={message.questionOptions}
+        <MultipleChoiceQuestion
+          question={message.text}
+          options={message.questionOptions!}
           onAnswer={onAnswer || (() => {})}
           language={language}
         />
       );
     }
+    // Open-ended question or other system message → render as normal message
+    // The user answers via the main chat input
     return (
       <div className="flex justify-center my-2.5">
         <div className="px-3.5 py-1.5 bg-white/3 border border-white/5 rounded-full text-[10px] font-mono text-titanium/50 tracking-wider backdrop-blur-md flex items-center gap-2">
@@ -110,8 +106,8 @@ export default function ExecutionCard({ message, language, onAnswer }: Execution
 
   const status = STATUS_CONFIG[statusKey] || STATUS_CONFIG.pending;
 
-  // If a question was detected, render it as a QuestionCard below the execution card
-  const showQuestion = detectedQuestion && !isStreaming;
+  // Multiple-choice question with structured options → render below response
+  const showMultipleChoice = hasStructuredOptions && !isStreaming;
 
   return (
     <motion.div
@@ -187,11 +183,11 @@ export default function ExecutionCard({ message, language, onAnswer }: Execution
         </div>
       )}
 
-      {/* Question card — shown BELOW the response text if detected */}
-      {showQuestion && (
-        <QuestionCard
-          text={detectedQuestion!.questionText}
-          options={detectedQuestion!.options}
+      {/* Multiple-choice question — shown BELOW response only when structured options exist */}
+      {showMultipleChoice && (
+        <MultipleChoiceQuestion
+          question={message.text}
+          options={message.questionOptions!}
           onAnswer={onAnswer || (() => {})}
           language={language}
         />

@@ -39,7 +39,7 @@ import {
   Settings,
   User
 } from "lucide-react";
-import { Message, FileItem, OrbState, InteractionMode } from "../types";
+import { Message, FileItem, OrbState, AgentName } from "../types";
 import { translations } from "../utils/translations";
 
 interface WorkspaceProps {
@@ -52,8 +52,8 @@ interface WorkspaceProps {
   onExecuteCommand: (cmd: string) => void;
   language: "en" | "fa";
   setLanguage: (lang: "en" | "fa") => void;
-  interactionMode: InteractionMode;
-  setInteractionMode: (mode: InteractionMode) => void;
+  agent: AgentName;
+  setAgent: (agent: AgentName) => void;
 }
 
 const localization = {
@@ -175,8 +175,8 @@ export default function Workspace({
   onExecuteCommand,
   language,
   setLanguage,
-  interactionMode,
-  setInteractionMode
+  agent,
+  setAgent
 }: WorkspaceProps) {
   // Sleek, glowing CSS animated circle representing our AI Character
   const AnimatedCircleAvatar = () => (

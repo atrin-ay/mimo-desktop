@@ -1,16 +1,21 @@
 import React, { useState, useRef, useEffect } from "react";
 import { motion } from "motion/react";
 import { Send, Mic, Terminal, Square } from "lucide-react";
-import { OrbState, InteractionMode } from "../types";
+import { OrbState, AgentName } from "../types";
 import { translations } from "../utils/translations";
+import { ModelInfo } from "../api";
 
 interface ChatInputProps {
   onSubmit: (prompt: string) => void;
   isLoading: boolean;
   orbState: OrbState;
   setOrbState: (state: OrbState) => void;
-  interactionMode: InteractionMode;
-  setInteractionMode: (mode: InteractionMode) => void;
+  agent: AgentName;
+  setAgent: (agent: AgentName) => void;
+  model: string;
+  setModel: (model: string) => void;
+  models: ModelInfo[];
+  modelsLoading: boolean;
   onStop: () => void;
   language: "en" | "fa";
 }
@@ -27,10 +32,10 @@ const PLACEHOLDERS_FA = [
   "توضیح دهید چه چیزی می‌خواهید بسازید...",
 ];
 
-const MODE_LABELS: Record<string, { en: string; fa: string }> = {
-  [InteractionMode.Direct]: { en: "Quick Chat", fa: "گفتگوی سریع" },
-  [InteractionMode.Plan]: { en: "Plan", fa: "برنامه" },
-  [InteractionMode.Agent]: { en: "Agent", fa: "عاملی" },
+const AGENT_LABELS: Record<string, { en: string; fa: string }> = {
+  build: { en: "Build", fa: "ساخت" },
+  plan: { en: "Plan", fa: "برنامه" },
+  compose: { en: "Compose", fa: "ترکیب" },
 };
 
 export default function ChatInput({
@@ -38,8 +43,12 @@ export default function ChatInput({
   isLoading,
   orbState,
   setOrbState,
-  interactionMode,
-  setInteractionMode,
+  agent,
+  setAgent,
+  model,
+  setModel,
+  models,
+  modelsLoading,
   onStop,
   language,
 }: ChatInputProps) {
@@ -88,18 +97,37 @@ export default function ChatInput({
 
   return (
     <div className="w-full max-w-3xl mx-auto z-30">
-      {/* Tiny mode indicator — just a label, doesn't change input shape */}
+      {/* Tiny mode & model indicator — just a label, doesn't change input shape */}
       <div className="flex items-center gap-2 mb-1.5 px-1">
         <select
-          value={interactionMode}
-          onChange={(e) => setInteractionMode(e.target.value as InteractionMode)}
+          value={agent}
+          onChange={(e) => setAgent(e.target.value as AgentName)}
           className="bg-transparent border-none text-[10px] font-mono text-titanium/50 uppercase tracking-wider cursor-pointer focus:outline-none hover:text-titanium/70 transition-colors"
         >
-          {Object.entries(MODE_LABELS).map(([mode, labels]) => (
-            <option key={mode} value={mode} className="bg-[#111] text-white">
+          {Object.entries(AGENT_LABELS).map(([agentName, labels]) => (
+            <option key={agentName} value={agentName} className="bg-[#111] text-white">
               {language === "fa" ? labels.fa : labels.en}
             </option>
           ))}
+        </select>
+
+        <div className="w-px h-3 bg-titanium/20" />
+
+        <select
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          disabled={modelsLoading}
+          className="bg-transparent border-none text-[10px] font-mono text-titanium/50 uppercase tracking-wider cursor-pointer focus:outline-none hover:text-titanium/70 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {modelsLoading ? (
+            <option className="bg-[#111] text-white">Loading...</option>
+          ) : (
+            models.map((m) => (
+              <option key={m.id} value={m.id} className="bg-[#111] text-white">
+                {m.name}
+              </option>
+            ))
+          )}
         </select>
       </div>
 

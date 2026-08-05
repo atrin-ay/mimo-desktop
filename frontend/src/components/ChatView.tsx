@@ -5,6 +5,7 @@ import { OrbState, AgentName, Message } from "../types";
 import { ModelInfo } from "../api";
 import { translations } from "../utils/translations";
 import Orb from "./Orb";
+import ErrorBoundary from "./ErrorBoundary";
 import ExecutionCard from "./ExecutionCard";
 import ChatInput from "./ChatInput";
 
@@ -110,7 +111,9 @@ export default function ChatView({
           <div className="p-3 bg-white/[0.02] border border-white/5 rounded-2xl flex items-center justify-between backdrop-blur-xl">
             <div className="flex items-center gap-3">
               <div className="relative flex items-center justify-center bg-black/40 rounded-full w-10 h-10 border border-white/10 overflow-hidden shrink-0">
-                <Orb state={orbState} size={50} onClick={() => {}} />
+                <ErrorBoundary fallback={<span className="text-xs text-neural-cyan">MIMO</span>}>
+                  <Orb state={orbState} size={50} onClick={() => {}} />
+                </ErrorBoundary>
               </div>
               <div className="flex flex-col">
                 <span className="text-[9px] font-mono tracking-widest text-neural-cyan uppercase">
@@ -129,24 +132,6 @@ export default function ChatView({
           {messages.map((msg) => (
             <ExecutionCard key={msg.id} message={msg} language={language} onAnswer={onAnswer} />
           ))}
-
-          {/* Loading dots when waiting for first event */}
-          {isLoading && messages.every((m) => m.sender !== "agent" || m.status === "done") && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="flex items-center gap-2 py-2 px-3"
-            >
-              <div className="flex gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-neural-cyan/60 animate-bounce" style={{ animationDelay: "0ms" }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-neural-cyan/60 animate-bounce" style={{ animationDelay: "150ms" }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-neural-cyan/60 animate-bounce" style={{ animationDelay: "300ms" }} />
-              </div>
-              <span className="text-[10px] text-titanium/40 font-mono">
-                {language === "fa" ? "شروع..." : "Starting..."}
-              </span>
-            </motion.div>
-          )}
         </div>
       </div>
 

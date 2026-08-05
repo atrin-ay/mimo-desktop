@@ -2,6 +2,15 @@ import express from 'express';
 import cors from 'cors';
 import { env } from './config/env';
 import { logger } from './config/logger';
+
+// ─── Catch-all error handlers (temporary — for debugging silent exits) ─────
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error({ reason: String(reason), stack: (reason as any)?.stack }, 'Unhandled promise rejection');
+});
+process.on('uncaughtException', (err) => {
+  logger.fatal({ err }, 'Uncaught exception — process will exit');
+  process.exit(1);
+});
 import sessionRoutes from './routes/sessionRoutes';
 import chatRoutes from './routes/chatRoutes';
 import adminRoutes from './routes/adminRoutes';
@@ -31,12 +40,7 @@ app.use('/api/context', contextRoutes);
 app.use('/api/mimo', mimoRoutes);
 app.use('/api/question', questionRoutes);
 app.use('/api/models', modelRoutes);
-if (env.nodeEnv !== 'production') {
-  app.use('/api/admin', adminRoutes);
-} else {
-  // In production do not expose the admin API for security
-  logger.info('Admin routes disabled in production');
-}
+app.use('/api/admin', adminRoutes);
 
 app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'ok' });

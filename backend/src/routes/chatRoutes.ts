@@ -11,6 +11,6 @@ const router = Router();
  *   POST /api/chat/stream - stream MiMo CLI events in real-time (SSE)
  */
 router.post('/', validate(chatSchema), sendMessage);
-router.post('/stream', streamMessage);
+router.post('/stream', validate(chatSchema), streamMessage);
 
 export default router;

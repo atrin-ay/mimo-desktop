@@ -56,9 +56,9 @@ export const memoryAgent = {
       // 3. Build the prompt
       const prompt = buildMemoryAgentPrompt(brain.data, recentMessages);
 
-      // 4. Call the memory provider
+      // 4. Call the memory provider (projectId ensures session isolation per project)
       const provider = getMemoryProvider();
-      const response = await provider.complete(prompt);
+      const response = await provider.complete(prompt, projectId);
 
       // 5. Parse and validate the response
       const patch = safeValidateMemoryPatch(response);

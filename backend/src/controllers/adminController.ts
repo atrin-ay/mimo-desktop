@@ -1,33 +1,35 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { Request, Response } from 'express';
 import { env } from '../config/env';
 import { resetProvider } from '../providers';
 import { logger } from '../config/logger';
 
-function upsertEnvVar(filePath: string, key: string, value: string) {
-  const exists = fs.existsSync(filePath);
-  let content = exists ? fs.readFileSync(filePath, 'utf8') : '';
+const OVERRIDES_FILE = path.resolve(process.cwd(), 'data', 'admin-overrides.json');
 
-  const line = `${key}=${value}`;
+function loadOverrides(): Record<string, string> {
+  try {
+    if (fs.existsSync(OVERRIDES_FILE)) {
+      return JSON.parse(fs.readFileSync(OVERRIDES_FILE, 'utf-8'));
+    }
+  } catch { /* ignore */ }
+  return {};
+}
 
-  if (content.includes(`${key}=`)) {
-    const regex = new RegExp(`^${key}=.*$`, 'm');
-    content = content.replace(regex, line);
-  } else {
-    if (content && !content.endsWith('\n')) content += '\n';
-    content += line + '\n';
+function saveOverrides(data: Record<string, string>): void {
+  const dir = path.dirname(OVERRIDES_FILE);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
+  fs.writeFileSync(OVERRIDES_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
+}
 
-  fs.writeFileSync(filePath, content, 'utf8');
+function keyHash(apiKey: string): string {
+  return crypto.createHash('sha256').update(apiKey).digest('hex').substring(0, 8);
 }
 
 export async function setApiKey(req: Request, res: Response) {
-  // Only allow setting the API key in non-production environments.
-  if (process.env.NODE_ENV === 'production') {
-    return res.status(403).json({ error: { code: 'forbidden', message: 'Not allowed in production' } });
-  }
-
   try {
     const { mimoApiKey, mimoBaseUrl, mimoModel } = req.body ?? {};
     const trimmedKey = (typeof mimoApiKey === 'string' ? mimoApiKey : '').trim();
@@ -74,23 +76,22 @@ export async function setApiKey(req: Request, res: Response) {
     // Reset cached provider so it picks up the new key and provider type
     resetProvider();
 
-    logger.info({ keyPrefix: trimmedKey.substring(0, 8) + '...', baseUrl: mimoBaseUrl || env.mimoBaseUrl, model: mimoModel || env.mimoModel }, 'API key updated and provider reset');
+    logger.info({ keyHash: keyHash(trimmedKey), baseUrl: mimoBaseUrl || env.mimoBaseUrl, model: mimoModel || env.mimoModel }, 'API key updated and provider reset');
 
-    // Also attempt to persist to .env at project root (development convenience)
-    const envPath = path.resolve(process.cwd(), '.env');
+    // Persist to admin-overrides.json (not .env — keeps secrets separate from config)
     try {
-      upsertEnvVar(envPath, 'MIMO_API_KEY', trimmedKey);
-      upsertEnvVar(envPath, 'AI_PROVIDER', 'mimo');
+      const overrides = loadOverrides();
+      overrides.MIMO_API_KEY = trimmedKey;
+      overrides.AI_PROVIDER = 'mimo';
       if (mimoBaseUrl && mimoBaseUrl.trim()) {
-        upsertEnvVar(envPath, 'MIMO_BASE_URL', mimoBaseUrl);
+        overrides.MIMO_BASE_URL = mimoBaseUrl;
       }
       if (mimoModel && mimoModel.trim()) {
-        upsertEnvVar(envPath, 'MIMO_MODEL', mimoModel);
+        overrides.MIMO_MODEL = mimoModel;
       }
+      saveOverrides(overrides);
     } catch (err) {
-      // non-fatal, log and continue
-      // eslint-disable-next-line no-console
-      console.warn('Failed to write .env file', err);
+      logger.warn({ err }, 'Failed to write admin-overrides.json');
     }
 
     return res.status(200).json({ data: { ok: true } });

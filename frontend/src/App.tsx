@@ -11,6 +11,7 @@ import HomeScreen from "./components/HomeScreen";
 import ChatView from "./components/ChatView";
 import DashboardSection from "./components/DashboardSection";
 import SettingsSection from "./components/SettingsSection";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 import {
   Home,
@@ -378,22 +379,24 @@ export default function App() {
                 const chatStarted = chat.messages.length > 0;
                 if (chatStarted) {
                   return (
-                    <ChatView
-                      messages={chat.messages}
-                      orbState={chat.orbState}
-                      setOrbState={chat.setOrbState}
-                      isLoading={chat.isLoading}
-                      agent={chat.agent}
-                      setAgent={chat.setAgent}
-                      model={chat.model}
-                      setModel={chat.setModel}
-                      models={chat.models}
-                      modelsLoading={chat.modelsLoading}
-                      onExecute={chat.handleExecuteCommand}
-                      onAnswer={chat.handleAnswer}
-                      onStop={chat.stopGeneration}
-                      language={language}
-                    />
+                    <ErrorBoundary fallback={<div className="flex items-center justify-center h-full text-sm text-titanium/60 font-mono p-8">Chat encountered an error. Please reload.</div>}>
+                      <ChatView
+                        messages={chat.messages}
+                        orbState={chat.orbState}
+                        setOrbState={chat.setOrbState}
+                        isLoading={chat.isLoading}
+                        agent={chat.agent}
+                        setAgent={chat.setAgent}
+                        model={chat.model}
+                        setModel={chat.setModel}
+                        models={chat.models}
+                        modelsLoading={chat.modelsLoading}
+                        onExecute={chat.handleExecuteCommand}
+                        onAnswer={chat.handleAnswer}
+                        onStop={chat.stopGeneration}
+                        language={language}
+                      />
+                    </ErrorBoundary>
                   );
                 }
                 return (

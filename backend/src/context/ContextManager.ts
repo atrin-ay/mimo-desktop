@@ -79,8 +79,9 @@ export const contextManager = {
       const content = brain.buildSummary();
 
       return {
-        role: 'user',
-        content: `[Project Context]\n${content}\n[/Project Context]`,
+        role: 'context',
+        content,
+        metadata: { type: 'project_context', projectId },
       };
     } catch (err) {
       logger.error({ err, projectId }, 'Failed to build context injection');

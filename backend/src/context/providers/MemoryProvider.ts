@@ -12,9 +12,11 @@ export interface MemoryProvider {
    * Generate a memory patch from the provided prompt.
    *
    * @param prompt - The assembled context (brain state + recent messages + task context)
+   * @param projectId - The project ID; implementations that use provider-side sessions
+   *   MUST NOT share sessions across different projectId values.
    * @returns The raw response string (should be a JSON MemoryPatch)
    */
-  complete(prompt: string): Promise<string>;
+  complete(prompt: string, projectId: string): Promise<string>;
 
   /** Check whether the provider is reachable / ready. */
   isAvailable(): Promise<boolean>;

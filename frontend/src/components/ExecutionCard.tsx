@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { ChevronDown, ChevronRight, User } from "lucide-react";
+import { ChevronRight, User, Check } from "lucide-react";
 import { Message, OrbState } from "../types";
 import OrbIndicator from "./OrbIndicator";
 import ExecutionTimeline from "./ExecutionTimeline";
 import ArtifactCard from "./ArtifactCard";
 import MultipleChoiceQuestion from "./MultipleChoiceQuestion";
+import ThinkingIndicator from "./ThinkingIndicator";
 
 interface ExecutionCardProps {
   message: Message;
@@ -21,20 +22,18 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }
 };
 
 export default function ExecutionCard({ message, language, onAnswer }: ExecutionCardProps) {
-  const [reasoningOpen, setReasoningOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const isUser = message.sender === "user";
   const isSystem = message.sender === "system";
   const isStreaming = message.status === "streaming";
 
-  // Determine if this is a multiple-choice question (structured options only)
   const hasStructuredOptions =
     message.isQuestion &&
     message.questionOptions &&
     message.questionOptions.length >= 2;
 
-  // System messages
+  // ─── System messages ─────────────────────────────────────────────────
   if (isSystem) {
-    // Multiple-choice question → render as interactive options
     if (hasStructuredOptions) {
       return (
         <MultipleChoiceQuestion
@@ -45,8 +44,6 @@ export default function ExecutionCard({ message, language, onAnswer }: Execution
         />
       );
     }
-    // Open-ended question or other system message → render as normal message
-    // The user answers via the main chat input
     return (
       <div className="flex justify-center my-2.5">
         <div className="px-3.5 py-1.5 bg-white/3 border border-white/5 rounded-full text-[10px] font-mono text-titanium/50 tracking-wider backdrop-blur-md flex items-center gap-2">
@@ -57,7 +54,7 @@ export default function ExecutionCard({ message, language, onAnswer }: Execution
     );
   }
 
-  // User messages
+  // ─── User messages ───────────────────────────────────────────────────
   if (isUser) {
     return (
       <motion.div
@@ -81,11 +78,14 @@ export default function ExecutionCard({ message, language, onAnswer }: Execution
     );
   }
 
-  // Agent messages
+  // ─── Agent messages ──────────────────────────────────────────────────
+
   const hasEvents = message.events && message.events.length > 0;
   const hasArtifacts = message.artifacts && message.artifacts.length > 0;
   const hasReasoning = message.reasoning && message.reasoning.length > 0;
+  const hasText = message.text && message.text.length > 0;
 
+  // Orb state and status
   let orbStateForCard = OrbState.Idle;
   let statusKey = "pending";
   if (isStreaming) {
@@ -106,7 +106,15 @@ export default function ExecutionCard({ message, language, onAnswer }: Execution
 
   const status = STATUS_CONFIG[statusKey] || STATUS_CONFIG.pending;
 
-  // Multiple-choice question with structured options → render below response
+  // Thinking: only when streaming, no text, AND no events yet
+  const isThinking = isStreaming && !hasText && !hasEvents;
+
+  // Show live timeline when streaming and events exist (not thinking)
+  const showLiveTimeline = isStreaming && hasEvents && !isThinking;
+
+  // Show details section after completion (collapsible)
+  const showDetailsSection = !isStreaming && (hasEvents || hasReasoning);
+
   const showMultipleChoice = hasStructuredOptions && !isStreaming;
 
   return (
@@ -116,51 +124,148 @@ export default function ExecutionCard({ message, language, onAnswer }: Execution
       transition={{ duration: 0.35 }}
       className="flex flex-col gap-2 text-left w-full max-w-[80%]"
     >
-      {/* Execution Card Container */}
+      {/* ─── Main Card ─── */}
       <div className="bg-[#0c0c12]/80 border border-white/6 rounded-2xl p-4 backdrop-blur-xl">
         {/* Header */}
-        <div className="flex items-center gap-3 mb-4">
+        <div className="flex items-center gap-3 mb-3">
           <OrbIndicator state={orbStateForCard} size={32} />
           <span className="text-[13px] font-bold text-white/90 tracking-wide">MiMo</span>
-          <span className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded-md border uppercase tracking-wider ${status.color} ${status.bg}`}>
-            {status.label}
-          </span>
+
+          <AnimatePresence mode="wait">
+            <motion.span
+              key={statusKey}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              transition={{ duration: 0.25 }}
+              className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded-md border uppercase tracking-wider ${status.color} ${status.bg}`}
+            >
+              {statusKey === "done" ? (
+                <span className="flex items-center gap-1">
+                  <Check size={9} strokeWidth={3} />
+                  {status.label}
+                </span>
+              ) : (
+                status.label
+              )}
+            </motion.span>
+          </AnimatePresence>
+
           <span className="text-[10px] font-mono text-white/25 ml-auto tabular-nums">
             {message.timestamp}
           </span>
         </div>
 
-        {hasEvents && <ExecutionTimeline events={message.events} />}
-
-        {hasArtifacts && (
-          <div className="mt-2 space-y-1.5">
-            <div className="text-[9px] font-mono tracking-wider text-titanium/50 uppercase px-1">Generated Files</div>
-            {message.artifacts.map((art) => (
-              <ArtifactCard key={art.id} artifact={art} />
-            ))}
-          </div>
-        )}
-
-        {hasReasoning && (
-          <div className="mt-2 pt-2 border-t border-white/5">
-            <button
-              onClick={() => setReasoningOpen(!reasoningOpen)}
-              className="flex items-center gap-1.5 text-[10px] font-mono text-titanium/40 hover:text-titanium/60 transition-colors cursor-pointer px-1"
+        {/* ─── Content Area ─── */}
+        <AnimatePresence mode="wait">
+          {isThinking ? (
+            /* THINKING — only when no events and no text yet */
+            <motion.div
+              key="thinking"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0, transition: { duration: 0.15 } }}
             >
-              {reasoningOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-              <span>View Reasoning</span>
+              <ThinkingIndicator language={language} />
+            </motion.div>
+          ) : (
+            /* RESPONSE + LIVE EVENTS */
+            <motion.div
+              key="response"
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              className="space-y-3"
+            >
+              {/* Artifacts */}
+              {hasArtifacts && (
+                <div className="space-y-1.5">
+                  <div className="text-[9px] font-mono tracking-wider text-titanium/50 uppercase px-1">Generated Files</div>
+                  {message.artifacts.map((art) => (
+                    <ArtifactCard key={art.id} artifact={art} />
+                  ))}
+                </div>
+              )}
+
+              {/* Response text — primary focus */}
+              {hasText && (
+                <div className="px-1 py-1 text-xs md:text-[13px] leading-relaxed text-white/85 whitespace-pre-line">
+                  {message.text}
+                </div>
+              )}
+
+              {/* Streaming cursor */}
+              {isStreaming && hasText && (
+                <motion.div
+                  className="w-1.5 h-1.5 rounded-full bg-neural-cyan/60"
+                  animate={{ opacity: [0.4, 1, 0.4] }}
+                  transition={{ duration: 1, repeat: Infinity }}
+                />
+              )}
+
+              {/* LIVE EXECUTION TIMELINE — visible during streaming */}
+              {showLiveTimeline && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  transition={{ duration: 0.25 }}
+                  className="overflow-hidden"
+                >
+                  <ExecutionTimeline events={message.events} />
+                </motion.div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ─── Post-completion: single collapsible Details section ─── */}
+        {showDetailsSection && (
+          <div className="mt-3 pt-3 border-t border-white/5">
+            <button
+              onClick={() => setDetailsOpen(!detailsOpen)}
+              className="flex items-center gap-1.5 text-[10px] font-mono text-titanium/40 hover:text-titanium/60 transition-colors cursor-pointer px-1 group"
+            >
+              <motion.span
+                animate={{ rotate: detailsOpen ? 90 : 0 }}
+                transition={{ duration: 0.2 }}
+                className="inline-flex"
+              >
+                <ChevronRight size={11} />
+              </motion.span>
+              <span className="group-hover:text-titanium/70 transition-colors">
+                {detailsOpen
+                  ? (language === "fa" ? "بستن جزئیات" : "Hide details")
+                  : (language === "fa" ? "مشاهده جزئیات" : "Execution Details")}
+              </span>
+              {hasEvents && (
+                <span className="text-[9px] text-titanium/25 ml-1">
+                  {message.events.length} {message.events.length === 1 ? "step" : "steps"}
+                </span>
+              )}
             </button>
+
             <AnimatePresence>
-              {reasoningOpen && (
+              {detailsOpen && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: "auto" }}
                   exit={{ opacity: 0, height: 0 }}
-                  transition={{ duration: 0.2 }}
+                  transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
                   className="overflow-hidden"
                 >
-                  <div className="mt-1.5 p-3 bg-purple-400/[0.04] border border-purple-400/10 rounded-xl text-[11px] text-titanium/60 font-mono leading-relaxed whitespace-pre-line max-h-[200px] overflow-y-auto">
-                    {message.reasoning}
+                  <div className="mt-2 space-y-3">
+                    {/* Execution timeline */}
+                    {hasEvents && <ExecutionTimeline events={message.events} />}
+
+                    {/* Reasoning text */}
+                    {hasReasoning && (
+                      <div className="pt-2 border-t border-white/5">
+                        <div className="text-[9px] font-mono tracking-wider text-titanium/50 uppercase px-1 mb-1.5">Reasoning</div>
+                        <div className="p-3 bg-purple-400/[0.04] border border-purple-400/10 rounded-xl text-[11px] text-titanium/60 font-mono leading-relaxed whitespace-pre-line max-h-[200px] overflow-y-auto">
+                          {message.reasoning}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -169,21 +274,7 @@ export default function ExecutionCard({ message, language, onAnswer }: Execution
         )}
       </div>
 
-      {/* Response text — always shown */}
-      {(message.text || (isStreaming && !message.text)) && (
-        <div className="px-4 py-3 bg-[#0c0c12]/60 border border-white/5 rounded-2xl rounded-tl-none text-xs md:text-[13px] leading-relaxed backdrop-blur-md whitespace-pre-line text-white/85">
-          {message.text}
-          {isStreaming && !message.text && (
-            <div className="flex items-center gap-1.5 py-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-neural-cyan/60 animate-bounce" style={{ animationDelay: "0ms" }} />
-              <span className="w-1.5 h-1.5 rounded-full bg-neural-cyan/60 animate-bounce" style={{ animationDelay: "150ms" }} />
-              <span className="w-1.5 h-1.5 rounded-full bg-neural-cyan/60 animate-bounce" style={{ animationDelay: "300ms" }} />
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Multiple-choice question — shown BELOW response only when structured options exist */}
+      {/* Multiple-choice question — below card */}
       {showMultipleChoice && (
         <MultipleChoiceQuestion
           question={message.text}

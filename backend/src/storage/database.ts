@@ -112,6 +112,14 @@ export function initSchema(): void {
       ON brain_suggestions(status);
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
   logger.info('Database schema initialized');
 }
 

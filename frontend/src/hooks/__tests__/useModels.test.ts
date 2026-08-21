@@ -4,12 +4,12 @@ import useModels from '../useModels';
 
 // ─── Mock API ──────────────────────────────────────────────────────────────
 
-const mockListModels = vi.fn();
+const mockGetModelCatalog = vi.fn();
 const mockGetCurrentModel = vi.fn();
 const mockSetCurrentModel = vi.fn();
 
 vi.mock('../../api', () => ({
-  listModels: (...args: any[]) => mockListModels(...args),
+  getModelCatalog: (...args: any[]) => mockGetModelCatalog(...args),
   getCurrentModel: (...args: any[]) => mockGetCurrentModel(...args),
   setCurrentModel: (...args: any[]) => mockSetCurrentModel(...args),
 }));
@@ -21,82 +21,102 @@ describe('useModels', () => {
     vi.clearAllMocks();
   });
 
-  it('loads models and current model on mount', async () => {
-    mockListModels.mockResolvedValue([
-      { id: 'mimo/mimo-auto', name: 'Auto' },
-      { id: 'xiaomi/mimo-v2.5', name: 'MiMo v2.5' },
-    ]);
-    mockGetCurrentModel.mockResolvedValue('mimo/mimo-auto');
+  it('loads catalog and current model on mount', async () => {
+    mockGetModelCatalog.mockResolvedValue({
+      providers: [
+        {
+          id: 'xiaomi',
+          name: 'Xiaomi',
+          env: [],
+          options: {},
+          source: 'config',
+          hasCredential: true,
+          models: [
+            { id: 'xiaomi/mimo-v2.5', providerID: 'xiaomi', modelID: 'mimo-v2.5', name: 'MiMo v2.5' },
+          ],
+        },
+      ],
+      default: { xiaomi: 'mimo-v2.5' },
+      fetchedAt: Date.now(),
+    });
+    mockGetCurrentModel.mockResolvedValue('xiaomi/mimo-v2.5');
 
     const { result } = renderHook(() => useModels());
 
-    // Initially loading
-    expect(result.current.modelsLoading).toBe(true);
-    expect(result.current.model).toBe('mimo/mimo-auto');
-    expect(result.current.models).toEqual([]);
+    expect(result.current.loading).toBe(true);
+    expect(result.current.model).toBe('');
+    expect(result.current.providers).toEqual([]);
 
     await waitFor(() => {
-      expect(result.current.modelsLoading).toBe(false);
+      expect(result.current.loading).toBe(false);
     });
 
-    expect(result.current.models).toHaveLength(2);
-    expect(result.current.model).toBe('mimo/mimo-auto');
-    expect(result.current.modelsError).toBeNull();
+    expect(result.current.providers).toHaveLength(1);
+    expect(result.current.model).toBe('xiaomi/mimo-v2.5');
+    expect(result.current.error).toBeNull();
   });
 
-  it('falls back to default models on load failure', async () => {
-    mockListModels.mockRejectedValue(new Error('Network error'));
-    mockGetCurrentModel.mockRejectedValue(new Error('Network error'));
+  it('sets error state on load failure without fallback list', async () => {
+    mockGetModelCatalog.mockRejectedValue(new Error('Provider not ready'));
+    mockGetCurrentModel.mockRejectedValue(new Error('Provider not ready'));
 
     const { result } = renderHook(() => useModels());
 
     await waitFor(() => {
-      expect(result.current.modelsLoading).toBe(false);
+      expect(result.current.loading).toBe(false);
     });
 
-    // Should have default fallback models
-    expect(result.current.models).toHaveLength(4);
-    expect(result.current.models[0].id).toBe('mimo/mimo-auto');
-    expect(result.current.modelsError).toBe('Network error');
+    expect(result.current.providers).toHaveLength(0);
+    expect(result.current.error).toBe('Provider not ready');
   });
 
   it('setModel persists to backend and updates local state', async () => {
-    mockListModels.mockResolvedValue([]);
-    mockGetCurrentModel.mockResolvedValue('mimo/mimo-auto');
+    mockGetModelCatalog.mockResolvedValue({
+      providers: [],
+      default: {},
+      fetchedAt: Date.now(),
+    });
+    mockGetCurrentModel.mockResolvedValue('xiaomi/mimo-v2.5');
     mockSetCurrentModel.mockResolvedValue(undefined);
 
     const { result } = renderHook(() => useModels());
 
     await waitFor(() => {
-      expect(result.current.modelsLoading).toBe(false);
+      expect(result.current.loading).toBe(false);
     });
 
     await act(async () => {
-      await result.current.setModel('xiaomi/mimo-v2.5');
+      await result.current.setModel('xiaomi/mimo-v2.5-pro');
     });
 
-    expect(result.current.model).toBe('xiaomi/mimo-v2.5');
-    expect(mockSetCurrentModel).toHaveBeenCalledWith('xiaomi/mimo-v2.5');
-    expect(result.current.modelsError).toBeNull();
+    expect(result.current.model).toBe('xiaomi/mimo-v2.5-pro');
+    expect(mockSetCurrentModel).toHaveBeenCalledWith('xiaomi/mimo-v2.5-pro');
+    expect(result.current.error).toBeNull();
   });
 
-  it('setModel keeps local state even when persistence fails', async () => {
-    mockListModels.mockResolvedValue([]);
-    mockGetCurrentModel.mockResolvedValue('mimo/mimo-auto');
+  it('setModel reverts local state when persistence fails', async () => {
+    mockGetModelCatalog.mockResolvedValue({
+      providers: [],
+      default: {},
+      fetchedAt: Date.now(),
+    });
+    mockGetCurrentModel.mockResolvedValue('xiaomi/mimo-v2.5');
     mockSetCurrentModel.mockRejectedValue(new Error('Save failed'));
 
     const { result } = renderHook(() => useModels());
 
     await waitFor(() => {
-      expect(result.current.modelsLoading).toBe(false);
+      expect(result.current.loading).toBe(false);
     });
 
     await act(async () => {
-      await result.current.setModel('xiaomi/mimo-v2.5');
+      try {
+        await result.current.setModel('xiaomi/mimo-v2.5-pro');
+      } catch {}
     });
 
-    // Local state updated despite backend failure
+    // Reverts on failure
     expect(result.current.model).toBe('xiaomi/mimo-v2.5');
-    expect(result.current.modelsError).toBe('Save failed');
+    expect(result.current.error).toBe('Save failed');
   });
 });

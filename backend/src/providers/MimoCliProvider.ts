@@ -8,8 +8,7 @@ import type {
 } from '../types';
 import { logger } from '../config/logger';
 import { env } from '../config/env';
-import * as fs from 'fs';
-import * as path from 'path';
+import { getRuntimePaths, resolveMimoBinary, buildChildEnv } from '../mimo/runtime';
 
 // ─── Valid agents ────────────────────────────────────────────────────────────
 
@@ -61,81 +60,14 @@ export interface CliExportedSession {
   }>;
 }
 
-export interface CliConfig {
-  model?: string;
-  provider?: string;
-  apiKey?: string;
-  workdir?: string;
-  [key: string]: unknown;
-}
-
-// ─── Binary detection ────────────────────────────────────────────────────────
-
-function findMimoBinary(): string {
-  const candidates: string[] = [];
-
-  try {
-    const npmGlobalDir = path.join(process.env.APPDATA || '', 'npm', 'node_modules', '@mimo-ai');
-    if (fs.existsSync(npmGlobalDir)) {
-      const findExe = (dir: string): string | null => {
-        try {
-          for (const entry of fs.readdirSync(dir)) {
-            const full = path.join(dir, entry);
-            if (entry === 'mimo.exe') return full;
-            if (fs.statSync(full).isDirectory()) {
-              const found = findExe(full);
-              if (found) return found;
-            }
-          }
-        } catch {}
-        return null;
-      };
-      const exe = findExe(npmGlobalDir);
-      if (exe) candidates.push(exe);
-    }
-  } catch {}
-
-  try {
-    const nvmDir = process.env.NVM_SYMLINK || path.join(process.env.APPDATA || '', 'nvm');
-    if (fs.existsSync(nvmDir)) {
-      const versions = fs.readdirSync(nvmDir).filter(d => d.startsWith('v'));
-      for (const v of versions) {
-        candidates.push(path.join(nvmDir, v, 'node_modules', '@mimo-ai', 'cli', 'node_modules', '@mimo-ai', 'mimocode-windows-x64', 'bin', 'mimo.exe'));
-      }
-    }
-  } catch {}
-
-  try {
-    const npmRoot = execFileSync('npm', ['root', '-g'], { encoding: 'utf-8', timeout: 5000 }).trim();
-    candidates.push(path.join(npmRoot, '@mimo-ai', 'cli', 'node_modules', '@mimo-ai', 'mimocode-windows-x64', 'bin', 'mimo.exe'));
-  } catch {}
-
-  for (const c of candidates) {
-    try {
-      if (fs.existsSync(c)) {
-        logger.info({ path: c }, 'Found MiMo CLI binary');
-        return c;
-      }
-    } catch {}
-  }
-
-  return 'mimo';
-}
-
 // ─── CLI helpers ─────────────────────────────────────────────────────────────
 
-function cliEnv(): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    CHCP: '65001',
-    PYTHONIOENCODING: 'utf-8',
-    LANG: 'en_US.UTF-8',
-    LC_ALL: 'en_US.UTF-8',
-  };
-}
-
 function cliCwd(): string {
-  return process.env.USERPROFILE || process.env.HOME || '.';
+  try {
+    return getRuntimePaths().repoRoot;
+  } catch {
+    return process.cwd();
+  }
 }
 
 function execCli(
@@ -147,7 +79,7 @@ function execCli(
     const proc = spawn(binary, args, {
       cwd: cliCwd(),
       shell: false,
-      env: cliEnv(),
+      env: buildChildEnv(),
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
@@ -213,7 +145,7 @@ export class MimoCliProvider implements AIProvider {
   private binary: string;
 
   constructor() {
-    this.binary = findMimoBinary();
+    this.binary = resolveMimoBinary();
     logger.info({ binary: this.binary }, 'MimoCliProvider initialized');
   }
 
@@ -224,10 +156,6 @@ export class MimoCliProvider implements AIProvider {
       throw new Error('MimoCliProvider requires at least one message');
     }
 
-    // conversationId is accepted for interface conformance but not used here.
-    // MimoCliProvider spawns `mimo run` per message — each invocation is
-    // stateless and does not maintain server-side sessions. The CLI does not
-    // expose a session-resume flag, so there is no session to map to.
     void conversationId;
 
     const resolvedAgent = this.resolveAgent(agent);
@@ -235,7 +163,7 @@ export class MimoCliProvider implements AIProvider {
     const args = this.buildCliArgs(resolvedAgent, prompt, model);
 
     const startTime = Date.now();
-    debugLog('sendMessage', { agent: resolvedAgent, messageCount: messages.length, args: [this.binary, ...args] });
+    debugLog('sendMessage', { agent: resolvedAgent, messageCount: messages.length });
 
     const { stdout, stderr, code } = await execCli(this.binary, args);
 
@@ -243,8 +171,6 @@ export class MimoCliProvider implements AIProvider {
     const lastTextEvent = events.filter((e: any) => e.type === 'text').pop();
     const content = lastTextEvent?.part?.text || '';
     const duration = Date.now() - startTime;
-
-    debugLog('response', { agent: resolvedAgent, eventsCount: events.length, contentLength: content.length, duration, exitCode: code });
 
     if (content) {
       return {
@@ -273,21 +199,14 @@ export class MimoCliProvider implements AIProvider {
       throw new Error('MimoCliProvider requires at least one message');
     }
 
-    // conversationId is accepted for interface conformance but not used.
-    // See sendMessage() comment for rationale.
     void conversationId;
 
     const resolvedAgent = this.resolveAgent(agent);
     const prompt = this.buildPrompt(messages);
     const args = this.buildCliArgs(resolvedAgent, prompt, model);
 
-    // TEMPORARY DEBUG — log full spawn command
-    console.log('[MimoCliProvider DEBUG] Spawning:', this.binary, args.join(' '));
-
     const startTime = Date.now();
-    debugLog('sendMessageStream', { agent: resolvedAgent, messageCount: messages.length, fullCommand: [this.binary, ...args].join(' ') });
 
-    // Emit agent status so frontend knows what's active
     onEvent({
       type: 'status',
       agent: resolvedAgent,
@@ -298,7 +217,7 @@ export class MimoCliProvider implements AIProvider {
       const proc = spawn(this.binary, args, {
         cwd: cliCwd(),
         shell: false,
-        env: cliEnv(),
+        env: buildChildEnv(),
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
       });
@@ -316,7 +235,6 @@ export class MimoCliProvider implements AIProvider {
           if (!trimmed) continue;
           try {
             const event = JSON.parse(trimmed);
-            debugLog('raw_event', { type: event.type, tool: event.part?.tool });
             onEvent(event);
           } catch {
             onEvent({ type: 'raw', text: trimmed, timestamp: Date.now() });
@@ -361,7 +279,7 @@ export class MimoCliProvider implements AIProvider {
       const result = execFileSync(this.binary, ['--version'], {
         encoding: 'utf-8',
         timeout: 5000,
-        shell: true,
+        shell: false,
       });
       return {
         healthy: true,
@@ -382,8 +300,6 @@ export class MimoCliProvider implements AIProvider {
       };
     }
   }
-
-  // ── Session management ───────────────────────────────────────────────────
 
   async listSessions(): Promise<CliSessionInfo[]> {
     const { stdout } = await execCli(this.binary, ['session', 'list', '--format', 'json']);
@@ -412,24 +328,28 @@ export class MimoCliProvider implements AIProvider {
     }
   }
 
-  // ── MiMo CLI native capabilities ────────────────────────────────────────
-
   async getVersion(): Promise<string> {
     const { stdout } = await execCli(this.binary, ['--version']);
     return stdout.trim();
   }
 
-  async getConfig(): Promise<CliConfig> {
-    const { stdout } = await execCli(this.binary, ['config', '--json']);
-    const parsed = parseJsonOutput(stdout);
-    return (parsed as CliConfig) || {};
-  }
-
   async runCommand(args: string[]): Promise<{ stdout: string; stderr: string; code: number | null }> {
+    const allowedCommands = new Set(['models', 'providers', 'version']);
+    const primaryCmd = args[0]?.toLowerCase();
+    if (!primaryCmd || !allowedCommands.has(primaryCmd)) {
+      throw new Error(`Forbidden command in MimoCliProvider.runCommand: "${primaryCmd}"`);
+    }
+
+    const allowedFlags = new Set(['--refresh', '--verbose', '--json', '-v']);
+    for (let i = 1; i < args.length; i++) {
+      const arg = args[i];
+      if (arg.startsWith('-') && !allowedFlags.has(arg)) {
+        throw new Error(`Forbidden flag in MimoCliProvider.runCommand: "${arg}"`);
+      }
+    }
+
     return execCli(this.binary, args);
   }
-
-  // ── Internal helpers ─────────────────────────────────────────────────────
 
   private resolveAgent(agent?: string): MiMoAgent {
     if (agent && VALID_AGENTS.has(agent)) {
@@ -447,11 +367,6 @@ export class MimoCliProvider implements AIProvider {
       args.push('--model', model);
     }
     args.push(message);
-
-    // TEMPORARY DEBUG LOGGING — verify model reaches CLI
-    console.log('[MimoCliProvider DEBUG] Full CLI args:', JSON.stringify([this.binary, ...args]));
-    console.log('[MimoCliProvider DEBUG] Model argument:', model || '(none)');
-
     return args;
   }
 
@@ -461,13 +376,6 @@ export class MimoCliProvider implements AIProvider {
       throw new Error('No user message found');
     }
 
-    // Only send the latest user message to the CLI. The CLI maintains its own
-    // session history, so injecting the full transcript here caused it to echo
-    // prior "User: ..." lines back into the assistant response.
-    //
-    // The one exception is the project-context injection, which carries
-    // memory/brain context the CLI cannot recover from its own session history.
-    // It is typed as role: 'context' and wrapped in <project_context> tags.
     const contextInjection = messages.find((m) => m.role === 'context');
 
     if (contextInjection) {

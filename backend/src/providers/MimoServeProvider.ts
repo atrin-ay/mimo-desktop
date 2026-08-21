@@ -1,4 +1,4 @@
-import { spawn, execFileSync } from 'child_process';
+import { spawn } from 'child_process';
 import type { AIProvider } from './AIProvider';
 import type {
   ProviderHealth,
@@ -9,8 +9,16 @@ import type {
 import { logger } from '../config/logger';
 import { env } from '../config/env';
 import { EventEmitter } from 'events';
-import * as fs from 'fs';
-import * as path from 'path';
+import {
+  getRuntimePaths,
+  ensureRuntimeDirs,
+  resolveMimoBinary,
+  buildChildEnv,
+  pickFreePort,
+  generateServePassword,
+  assertPathInsideRuntime,
+} from '../mimo/runtime';
+import { MimoLocalClient } from '../mimo/client';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -39,58 +47,6 @@ export interface MiMoEvent {
   [key: string]: unknown;
 }
 
-// ─── Binary detection ────────────────────────────────────────────────────────
-
-function findMimoBinary(): string {
-  const candidates: string[] = [];
-
-  try {
-    const npmGlobalDir = path.join(process.env.APPDATA || '', 'npm', 'node_modules', '@mimo-ai');
-    if (fs.existsSync(npmGlobalDir)) {
-      const findExe = (dir: string): string | null => {
-        try {
-          for (const entry of fs.readdirSync(dir)) {
-            const full = path.join(dir, entry);
-            if (entry === 'mimo.exe') return full;
-            if (fs.statSync(full).isDirectory()) {
-              const found = findExe(full);
-              if (found) return found;
-            }
-          }
-        } catch {}
-        return null;
-      };
-      const exe = findExe(npmGlobalDir);
-      if (exe) candidates.push(exe);
-    }
-  } catch {}
-
-  try {
-    const nvmDir = process.env.NVM_SYMLINK || path.join(process.env.APPDATA || '', 'nvm');
-    if (fs.existsSync(nvmDir)) {
-      const versions = fs.readdirSync(nvmDir).filter(d => d.startsWith('v'));
-      for (const v of versions) {
-        candidates.push(path.join(nvmDir, v, 'node_modules', '@mimo-ai', 'cli', 'node_modules', '@mimo-ai', 'mimocode-windows-x64', 'bin', 'mimo.exe'));
-      }
-    }
-  } catch {}
-
-  try {
-    const npmRoot = execFileSync('npm', ['root', '-g'], { encoding: 'utf-8', timeout: 5000 }).trim();
-    candidates.push(path.join(npmRoot, '@mimo-ai', 'cli', 'node_modules', '@mimo-ai', 'mimocode-windows-x64', 'bin', 'mimo.exe'));
-  } catch {}
-
-  for (const c of candidates) {
-    try {
-      if (fs.existsSync(c)) {
-        return c;
-      }
-    } catch {}
-  }
-
-  return 'mimo';
-}
-
 // ─── Debug logging ───────────────────────────────────────────────────────────
 
 function debugLog(category: string, data: Record<string, unknown>) {
@@ -104,7 +60,7 @@ function debugLog(category: string, data: Record<string, unknown>) {
  * MiMo Serve Provider — connects to a running `mimo serve` instance via HTTP.
  *
  * Architecture:
- * - Manages a `mimo serve` subprocess lifecycle
+ * - Manages a `mimo serve` subprocess lifecycle with strict project isolation
  * - Connects to SSE event stream for real-time events
  * - Sends messages via HTTP POST to session prompt endpoint
  * - Answers questions via HTTP POST to question reply endpoint
@@ -112,14 +68,17 @@ function debugLog(category: string, data: Record<string, unknown>) {
  */
 export class MimoServeProvider extends EventEmitter implements AIProvider {
   readonly name = 'mimo-serve';
-  private binary: string;
+  private binary: string = '';
   private serveProcess: ReturnType<typeof spawn> | null = null;
   private serveUrl: string = '';
   private servePassword: string = '';
   private serveReady: boolean = false;
+  private isolationVerified: boolean = false;
+  private expectedPort: number = 0;
+  private startupError: string | null = null;
   private readyPromise: Promise<void>;
   private readyResolve: () => void = () => {};
-  private eventSource: any = null;
+  private readyReject: (err: Error) => void = () => {};
 
   // Session isolation: each conversationId maps to its own mimo session.
   private sessionMap: Map<string, string> = new Map(); // conversationId -> mimoSessionId
@@ -130,47 +89,51 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
 
   constructor() {
     super();
-    this.binary = findMimoBinary();
-    this.servePassword = env.mimoServerPassword || '';
-
-    // Create a promise that resolves when the server is ready
-    this.readyPromise = new Promise((resolve) => {
+    // Stop doing I/O or spawning at construction.
+    this.readyPromise = new Promise((resolve, reject) => {
       this.readyResolve = resolve;
-    });
-
-    logger.info({ binary: this.binary }, 'MimoServeProvider initialized');
-
-    // Auto-start mimo serve on construction
-    this.start().catch((err) => {
-      logger.error({ error: err.message }, 'Failed to start mimo serve');
+      this.readyReject = reject;
     });
 
     // Periodic sweep of stale session mappings
     this.sweepTimer = setInterval(() => this.sweepStaleSessions(), MimoServeProvider.SWEEP_INTERVAL_MS);
   }
 
-  // ── Lifecycle ────────────────────────────────────────────────────────────
+  // ── Lifecycle ────────────────────────────────────────────────------------
+
+  /**
+   * Initialize and start the mimo serve process. Called explicitly from index.ts.
+   */
+  async init(): Promise<void> {
+    try {
+      this.binary = resolveMimoBinary();
+      ensureRuntimeDirs();
+      await this.start();
+    } catch (err: any) {
+      this.startupError = err.message;
+      logger.error({ error: err.message }, 'MimoServeProvider init failed');
+      this.readyReject(err);
+      throw err;
+    }
+  }
 
   /**
    * Start the mimo serve process and connect to its event stream.
-   * Call this once when the backend starts.
    */
   async start(): Promise<void> {
-    const port = env.mimoServePort || 0; // 0 = auto-assign
-    const args = ['serve', '--port', String(port)];
+    const paths = getRuntimePaths();
+    const port = env.mimoServePort || (await pickFreePort());
+    this.expectedPort = port;
+    this.servePassword = env.mimoServerPassword || generateServePassword();
 
-    logger.info({ args }, 'Starting mimo serve');
+    const args = ['serve', '--port', String(port), '--hostname', '127.0.0.1'];
+
+    logger.info({ binary: this.binary, args, runtimeRoot: paths.runtimeRoot }, 'Starting isolated mimo serve');
 
     this.serveProcess = spawn(this.binary, args, {
-      cwd: process.env.USERPROFILE || process.env.HOME || '.',
+      cwd: paths.repoRoot,
       shell: false,
-      env: {
-        ...process.env,
-        CHCP: '65001',
-        PYTHONIOENCODING: 'utf-8',
-        LANG: 'en_US.UTF-8',
-        LC_ALL: 'en_US.UTF-8',
-      },
+      env: buildChildEnv({ MIMOCODE_SERVER_PASSWORD: this.servePassword }),
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
@@ -181,8 +144,6 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
       const text = data.toString('utf-8');
       startupOutput += text;
       logger.info({ text: text.trim() }, 'mimo serve stdout');
-
-      // Wait for the server to announce its URL
       this.checkForReady(startupOutput);
     });
 
@@ -190,8 +151,6 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
       const text = data.toString('utf-8');
       startupOutput += text;
       logger.info({ text: text.trim() }, 'mimo serve stderr');
-
-      // Also check stderr for the URL (mimo serve may output to stderr)
       this.checkForReady(startupOutput);
     });
 
@@ -203,19 +162,27 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
 
     this.serveProcess.on('error', (err) => {
       logger.error({ error: err.message }, 'mimo serve process error');
+      this.startupError = err.message;
       this.emit('error', { error: err.message });
+      this.readyReject(err);
     });
 
-    // Wait for server to be ready (with timeout)
+    const timeoutMs = env.mimoServeStartupTimeoutMs || 120000;
     const timeout = setTimeout(() => {
       if (!this.serveReady) {
-        logger.error('mimo serve startup timeout');
-        this.emit('error', { error: 'mimo serve startup timeout' });
+        const err = new Error(`mimo serve startup timeout after ${timeoutMs}ms. Output: ${startupOutput.slice(-500)}`);
+        logger.error({ error: err.message }, 'mimo serve startup timeout');
+        this.startupError = err.message;
+        this.readyReject(err);
+        this.emit('error', { error: err.message });
       }
-    }, 15000);
+    }, timeoutMs);
 
-    await this.readyPromise;
-    clearTimeout(timeout);
+    try {
+      await this.readyPromise;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   /**
@@ -227,27 +194,79 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
       this.sweepTimer = null;
     }
     if (this.serveProcess) {
-      this.serveProcess.kill('SIGTERM');
+      const proc = this.serveProcess;
       this.serveProcess = null;
       this.serveReady = false;
+
+      proc.kill('SIGTERM');
+
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          try {
+            if (process.platform === 'win32') {
+              spawn('taskkill', ['/pid', String(proc.pid), '/f', '/t']);
+            } else {
+              proc.kill('SIGKILL');
+            }
+          } catch {}
+          resolve();
+        }, 5000);
+
+        proc.on('close', () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+
       logger.info('mimo serve stopped');
     }
   }
 
   /**
-   * Check if the startup output contains the server URL.
+   * Check if the startup output contains the server URL and verify isolation.
    */
-  private checkForReady(output: string): void {
+  private async checkForReady(output: string): Promise<void> {
     if (this.serveReady) return;
 
-    // Match "listening on http://..." or just "http://..."
-    const urlMatch = output.match(/(?:listening on\s+)?(https?:\/\/[^\s\n]+)/);
-    if (urlMatch) {
-      this.serveUrl = urlMatch[1] || urlMatch[0];
-      this.serveReady = true;
-      logger.info({ url: this.serveUrl }, 'mimo serve is ready');
-      this.readyResolve();
-      this.connectEventStream();
+    const match = output.match(/mimocode server listening on\s+(https?:\/\/\S+)/);
+    if (match) {
+      const matchedUrl = match[1];
+      const parsedUrl = new URL(matchedUrl);
+      const portNum = parseInt(parsedUrl.port, 10);
+
+      if (portNum !== this.expectedPort) {
+        logger.error({ expected: this.expectedPort, actual: portNum }, 'Port mismatch on mimo serve startup');
+        return;
+      }
+
+      this.serveUrl = matchedUrl;
+
+      // Perform isolation verification before marking ready
+      try {
+        const paths = getRuntimePaths();
+        assertPathInsideRuntime(paths.authFile);
+
+        const client = new MimoLocalClient(this.serveUrl, this.servePassword);
+        const providersRes = await client.getProviders();
+
+        // Assert no environment-derived credential source or leak
+        for (const prov of providersRes.providers) {
+          if (prov.source === 'env' || prov.source === 'environment') {
+            throw new Error(`Provider ${prov.id} has environment-derived source: ${prov.source}`);
+          }
+        }
+
+        this.isolationVerified = true;
+        this.serveReady = true;
+        logger.info({ url: this.serveUrl, runtimeDir: paths.runtimeRoot }, 'Isolated mimo serve is ready and verified');
+        this.readyResolve();
+        this.connectEventStream();
+      } catch (err: any) {
+        logger.fatal({ error: err.message }, 'PROVIDER_ISOLATION_VIOLATED: failed isolation checks');
+        this.isolationVerified = false;
+        this.startupError = `PROVIDER_ISOLATION_VIOLATED: ${err.message}`;
+        this.readyReject(new Error(`provider_isolation_violated: ${err.message}`));
+      }
     }
   }
 
@@ -267,7 +286,6 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
 
     debugLog('connecting_sse', { url: eventUrl });
 
-    // Use fetch for SSE (Node 18+ has native fetch)
     this.fetchSSE(eventUrl, headers).catch((err) => {
       logger.error({ error: err.message }, 'SSE connection failed');
       this.emit('error', { error: `SSE connection failed: ${err.message}` });
@@ -319,7 +337,6 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
       }
     } catch (err: any) {
       logger.error({ error: err.message }, 'SSE stream error');
-      // Attempt reconnect after delay
       setTimeout(() => {
         if (this.serveReady) {
           this.connectEventStream();
@@ -328,14 +345,6 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
     }
   }
 
-  /**
-   * Extract the session ID from a MiMo SSE event.
-   *
-   * MiMo (opencode-family server) nests identifiers under `properties`, e.g.
-   * `{ type: 'session.idle', properties: { sessionID } }` or
-   * `{ type: 'message.part.updated', properties: { part: { sessionID } } }`.
-   * Older/CLI-style events carried it at the top level, so we check both.
-   */
   private eventSessionId(event: any): string | undefined {
     return (
       event?.properties?.sessionID ??
@@ -345,17 +354,12 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
     );
   }
 
-  /**
-   * Handle incoming SSE events from MiMo.
-   */
   private handleSSEEvent(event: any): void {
     const sessionID = this.eventSessionId(event);
     debugLog('sse_event', { type: event.type, sessionID });
 
-    // Emit all events for listeners
     this.emit('event', event);
 
-    // Special handling for question events
     if (event.type === 'question.asked') {
       const question: MiMoQuestion = {
         id: event.properties?.id || event.id,
@@ -368,15 +372,6 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
     }
   }
 
-  /**
-   * Translate a raw MiMo SSE event into the CLI-style event shape that the
-   * chat controller and frontend consume ({ type: 'text', part: { text } },
-   * 'tool_use', 'step_start', 'reasoning', ...).
-   *
-   * MiMo streams content via `message.part.updated`, where `properties.delta`
-   * carries the incremental text and `properties.part` the full part. Returns
-   * null for events that have no frontend representation (they are dropped).
-   */
   private translateEvent(event: any): any | null {
     const sessionID = this.eventSessionId(event);
 
@@ -388,8 +383,6 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
 
         switch (part.type) {
           case 'text':
-            // Prefer the incremental delta — the controller and frontend both
-            // append part.text, so sending cumulative text would duplicate it.
             return { type: 'text', part: { text: delta ?? part.text ?? '' }, sessionID };
           case 'reasoning':
             return { type: 'reasoning', part: { text: delta ?? part.text ?? '' }, sessionID };
@@ -411,12 +404,9 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
         return { type: 'error', message, sessionID };
       }
 
-      // Completion is signalled to the frontend by waitForCompletion via the
-      // controller's 'done' event, so session.idle itself is not forwarded.
       case 'session.idle':
         return null;
 
-      // Pass question events through untouched — the frontend reads them raw.
       case 'question.asked':
         return event;
 
@@ -424,8 +414,6 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
         return null;
     }
   }
-
-  // ── HTTP helpers ─────────────────────────────────────────────────────────
 
   private getHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
@@ -443,7 +431,7 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
     path: string,
     body?: unknown,
   ): Promise<{ status: number; data: any }> {
-    if (!this.serveUrl) {
+    if (!this.serveReady) {
       throw new Error('mimo serve not ready');
     }
 
@@ -451,11 +439,7 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
     const headers = this.getHeaders();
     const bodyStr = body !== undefined ? JSON.stringify(body) : undefined;
 
-    logger.info({
-      url,
-      headers,
-      body: bodyStr ?? '(no body)',
-    }, '[MIMO SESSION REQUEST]');
+    debugLog('httpRequest', { method, url });
 
     const options: RequestInit = {
       method,
@@ -484,7 +468,6 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
   // ── AIProvider interface ─────────────────────────────────────────────────
 
   async sendMessage(conversationId: string, messages: ProviderMessage[], agent?: MiMoAgent, model?: string): Promise<ProviderResult> {
-    // Wait for mimo serve to be ready
     if (!this.serveReady) {
       await Promise.race([
         this.readyPromise,
@@ -505,12 +488,8 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
     const prompt = this.buildPrompt(messages);
     const startTime = Date.now();
 
-    debugLog('sendMessage', { conversationId, agent: resolvedAgent, messageCount: messages.length });
-
-    // Resolve session for this conversation (create if needed)
     const sessionID = await this.resolveMimoSession(conversationId);
 
-    // Send prompt via HTTP
     const modelObj = model ? (() => {
       const slashIndex = model.indexOf('/');
       return slashIndex > -1
@@ -524,7 +503,6 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
       parts: [{ type: 'text', text: prompt }],
     });
 
-    // Handle "session not found" — recreate once and retry
     if (this.isSessionNotFound(result)) {
       const newSessionID = await this.recreateMimoSession(conversationId);
       result = await this.httpRequest('POST', `/session/${newSessionID}/message`, {
@@ -535,28 +513,17 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
     }
 
     const duration = Date.now() - startTime;
-    debugLog('sendMessage_response', { duration, status: result.status });
-
-    // Extract text from response.
-    // Mimo serve's HTTP API returns { info, parts } where parts is an array
-    // of parts like { type: "text", text: "..." }. Older shapes may have
-    // { content } or { text } directly.
     const content = (() => {
       const d = result.data;
       if (!d) return '';
-
-      // { parts: [...] } — mimo serve's real shape
       if (Array.isArray(d.parts)) {
         return d.parts
           .filter((p: any) => p.type === 'text' && typeof p.text === 'string')
           .map((p: any) => p.text)
           .join('');
       }
-
-      // Legacy shapes
       if (typeof d.content === 'string') return d.content;
       if (typeof d.text === 'string') return d.text;
-
       return '';
     })();
 
@@ -582,9 +549,7 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
     onEvent: (event: any) => void,
     model?: string,
   ): Promise<void> {
-    // Wait for mimo serve to be ready (with timeout)
     if (!this.serveReady) {
-      logger.info('Waiting for mimo serve to be ready...');
       await Promise.race([
         this.readyPromise,
         new Promise((_, reject) => setTimeout(() => reject(new Error('mimo serve startup timeout')), 20000)),
@@ -597,14 +562,10 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
 
     const resolvedAgent = this.resolveAgent(agent);
     const prompt = this.buildPrompt(messages);
-
     const startTime = Date.now();
-    debugLog('sendMessageStream', { conversationId, agent: resolvedAgent, messageCount: messages.length });
 
-    // Resolve session for this conversation (create if needed)
     const sessionID = await this.resolveMimoSession(conversationId);
 
-    // Emit status event
     onEvent({
       type: 'status',
       agent: resolvedAgent,
@@ -612,37 +573,23 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
       timestamp: Date.now(),
     });
 
-    // Track pending questions for this stream
     const pendingQuestions = new Map<string, { resolve: () => void }>();
 
-    // Listen for events from this session
     const eventHandler = (event: any) => {
       if (this.eventSessionId(event) !== sessionID) return;
-
-      // Translate raw MiMo events into the CLI-style shape the frontend
-      // consumes, then forward. Events with no representation are dropped.
       const translated = this.translateEvent(event);
       if (translated) onEvent(translated);
 
-      // Handle question events — forward to frontend and wait for HTTP reply
       if (event.type === 'question.asked') {
         const questionID = event.properties?.id || event.id;
-        debugLog('question_detected', { questionID, sessionID });
-
-        // Create a promise that resolves when the user replies via HTTP
         const questionPromise = new Promise<void>((resolve) => {
           pendingQuestions.set(questionID, { resolve });
         });
-
-        // Don't block — the reply handler will resolve this promise
-        questionPromise.then(() => {
-          debugLog('question_answered', { questionID });
-        });
+        questionPromise.then(() => {});
       }
     };
     this.on('event', eventHandler);
 
-    // Also listen for question replies via HTTP
     const replyHandler = (data: { requestID: string; answers: string[][] }) => {
       const pending = pendingQuestions.get(data.requestID);
       if (pending) {
@@ -660,14 +607,12 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
     })() : undefined;
 
     try {
-      // Send prompt via prompt_async (returns immediately, events stream via SSE)
       let promptResult = await this.httpRequest('POST', `/session/${sessionID}/prompt_async`, {
         agent: resolvedAgent,
         model: modelObjStream,
         parts: [{ type: 'text', text: prompt }],
       });
 
-      // Handle "session not found" — recreate once and retry
       if (this.isSessionNotFound(promptResult)) {
         const newSessionID = await this.recreateMimoSession(conversationId);
         promptResult = await this.httpRequest('POST', `/session/${newSessionID}/prompt_async`, {
@@ -677,11 +622,7 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
         });
       }
 
-      // Wait for completion — but questions are handled via the reply handler
       await this.waitForCompletion(sessionID, onEvent);
-
-      const duration = Date.now() - startTime;
-      debugLog('sendMessageStream_complete', { duration, sessionID });
     } finally {
       this.removeListener('event', eventHandler);
       this.removeListener('question_reply', replyHandler);
@@ -689,9 +630,6 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
     }
   }
 
-  /**
-   * Wait for MiMo to finish processing by watching for completion events.
-   */
   private async waitForCompletion(
     sessionID: string,
     onEvent: (event: any) => void,
@@ -700,14 +638,11 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
       const timeout = setTimeout(() => {
         this.removeListener('event', handler);
         reject(new Error('MiMo stream timeout'));
-      }, 300000); // 5 minute timeout
+      }, 300000);
 
       const handler = (event: any) => {
         if (this.eventSessionId(event) !== sessionID) return;
 
-        // MiMo signals the end of a turn with `session.idle`. It does NOT emit
-        // step_finish / session.completed / message.completed — those were
-        // never received, which is why this used to hang until the timeout.
         if (event.type === 'session.idle') {
           clearTimeout(timeout);
           this.removeListener('event', handler);
@@ -715,7 +650,6 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
           return;
         }
 
-        // A session error also ends the turn — surface it instead of waiting.
         if (event.type === 'session.error') {
           clearTimeout(timeout);
           this.removeListener('event', handler);
@@ -732,11 +666,17 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
   }
 
   async healthCheck(): Promise<ProviderHealth> {
+    const paths = getRuntimePaths();
     if (!this.serveReady) {
       return {
         healthy: false,
         provider: this.name,
-        details: { error: 'mimo serve not running' },
+        details: {
+          state: this.startupError ? 'failed' : 'starting',
+          isolationVerified: this.isolationVerified,
+          runtimeDir: paths.runtimeRoot,
+          reason: this.startupError || 'mimo serve not running',
+        },
       };
     }
 
@@ -746,6 +686,9 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
         healthy: result.status === 200,
         provider: this.name,
         details: {
+          state: 'ready',
+          isolationVerified: this.isolationVerified,
+          runtimeDir: paths.runtimeRoot,
           url: this.serveUrl,
           status: result.status,
           data: result.data,
@@ -755,42 +698,31 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
       return {
         healthy: false,
         provider: this.name,
-        details: { error: err.message },
+        details: {
+          state: 'failed',
+          isolationVerified: this.isolationVerified,
+          runtimeDir: paths.runtimeRoot,
+          error: err.message,
+        },
       };
     }
   }
 
-  // ── Question handling ────────────────────────────────────────────────────
-
-  /**
-   * Reply to a MiMo question.
-   * @param requestID The question ID from question.asked event
-   * @param answers Array of answer arrays (one per question in the request)
-   */
   async replyToQuestion(requestID: string, answers: string[][]): Promise<void> {
     debugLog('reply_question', { requestID, answers });
     await this.httpRequest('POST', `/question/${requestID}/reply`, { answers });
-    // Emit event so sendMessageStream's waiting promise resolves
     this.emit('question_reply', { requestID, answers });
   }
 
-  /**
-   * Reject a MiMo question.
-   */
   async rejectQuestion(requestID: string): Promise<void> {
     debugLog('reject_question', { requestID });
     await this.httpRequest('POST', `/question/${requestID}/reject`);
   }
 
-  /**
-   * List pending questions.
-   */
   async listQuestions(): Promise<any[]> {
     const result = await this.httpRequest('GET', '/question');
     return result.data || [];
   }
-
-  // ── Session management ───────────────────────────────────────────────────
 
   async listSessions(): Promise<Array<{ id: string; title: string; updatedAt: number }>> {
     const result = await this.httpRequest('GET', '/session');
@@ -806,57 +738,33 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
     await this.httpRequest('DELETE', `/session/${sessionId}`);
   }
 
-  // ── Agent listing ────────────────────────────────────────────────────────
-
   async listAgents(): Promise<Array<{ name: string; description?: string; mode?: string }>> {
     const result = await this.httpRequest('GET', '/agent');
     return result.data || [];
   }
 
-  // ── Session resolution ───────────────────────────────────────────────────
-
-  /**
-   * Resolve or create a mimo serve session for the given conversationId.
-   * Returns the existing mapped session if present, otherwise creates one
-   * via the mimo serve API and stores the mapping.
-   *
-   * On "session not found" errors (e.g. after a serve restart), evicts the
-   * stale mapping, recreates once, and retries the single request. Does not
-   * retry indefinitely — surfaces the error otherwise.
-   */
   private async resolveMimoSession(conversationId: string): Promise<string> {
-    // Check for existing mapping
     const existing = this.sessionMap.get(conversationId);
     if (existing) {
       this.sessionLastUsed.set(conversationId, Date.now());
       return existing;
     }
 
-    // Create a new session
     const createResult = await this.httpRequest('POST', '/session', {});
     const mimoSessionId = createResult.data?.id || createResult.data?.sessionID;
     if (!mimoSessionId) {
-      logger.error({ status: createResult.status, data: createResult.data, conversationId }, 'Failed to create MiMo session');
       throw new Error(`Failed to create MiMo session: ${JSON.stringify(createResult.data).slice(0, 200)}`);
     }
 
     this.sessionMap.set(conversationId, mimoSessionId);
     this.sessionLastUsed.set(conversationId, Date.now());
-    logger.info({ conversationId, mimoSessionId }, 'Created MiMo session mapping');
     return mimoSessionId;
   }
 
-  /**
-   * Attempt to recreate a session after a "session not found" error.
-   * Returns the new mimoSessionId, or throws if recreation fails.
-   */
   private async recreateMimoSession(conversationId: string): Promise<string> {
-    // Evict stale mapping
     this.sessionMap.delete(conversationId);
     this.sessionLastUsed.delete(conversationId);
-    logger.warn({ conversationId }, 'Evicted stale session mapping, recreating');
 
-    // Create fresh session
     const createResult = await this.httpRequest('POST', '/session', {});
     const mimoSessionId = createResult.data?.id || createResult.data?.sessionID;
     if (!mimoSessionId) {
@@ -865,13 +773,9 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
 
     this.sessionMap.set(conversationId, mimoSessionId);
     this.sessionLastUsed.set(conversationId, Date.now());
-    logger.info({ conversationId, mimoSessionId }, 'Recreated MiMo session mapping');
     return mimoSessionId;
   }
 
-  /**
-   * Check if an HTTP response indicates "session not found".
-   */
   private isSessionNotFound(response: { status: number; data: any }): boolean {
     if (response.status === 404) return true;
     if (response.status === 400 || response.status === 422) {
@@ -883,9 +787,6 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
     return false;
   }
 
-  /**
-   * Sweep sessionMap entries unused for 24h.
-   */
   private sweepStaleSessions(): void {
     const now = Date.now();
     let swept = 0;
@@ -900,8 +801,6 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
       logger.info({ swept, remaining: this.sessionMap.size }, 'Swept stale session mappings');
     }
   }
-
-  // ── Internal helpers ─────────────────────────────────────────────────────
 
   private resolveAgent(agent?: string): MiMoAgent {
     if (agent && VALID_AGENTS.has(agent)) {
@@ -919,12 +818,6 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
       throw new Error('No user message found');
     }
 
-    // Only send the latest user message to mimo serve. The server maintains its
-    // own session history, so injecting the full transcript here caused echo issues.
-    //
-    // The one exception is the project-context injection, which carries
-    // memory/brain context. It is typed as role: 'context' and wrapped in
-    // <project_context> tags with an anti-injection disclaimer.
     const contextInjection = messages.find((m) => m.role === 'context');
 
     if (contextInjection) {
@@ -934,8 +827,6 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
     return lastUserMsg.content;
   }
 
-  // ── Getters ──────────────────────────────────────────────────────────────
-
   get isReady(): boolean {
     return this.serveReady;
   }
@@ -944,7 +835,6 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
     return this.serveUrl;
   }
 
-  /** Returns the mimo session ID for a given conversationId, or null if not mapped. */
   getSessionForConversation(conversationId: string): string | null {
     return this.sessionMap.get(conversationId) ?? null;
   }

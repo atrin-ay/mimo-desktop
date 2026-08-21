@@ -1,4 +1,4 @@
-const API_BASE = 'http://localhost:3001/api';
+const API_BASE = (import.meta as any).env?.VITE_API_BASE ?? 'http://localhost:3001/api';
 
 export interface ApiSession {
   id: string;
@@ -24,6 +24,15 @@ export interface ApiError {
     message: string;
     details?: unknown;
   };
+}
+
+function getAdminHeaders(): Record<string, string> {
+  const token = (import.meta as any).env?.VITE_ADMIN_TOKEN || localStorage.getItem('admin_token') || '';
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
 }
 
 async function parseError(response: Response): Promise<string> {
@@ -210,28 +219,110 @@ export async function ignoreSuggestion(id: string): Promise<void> {
   }
 }
 
-export async function healthCheck(): Promise<{ status: string }> {
-  const res = await fetch('http://localhost:3001/health');
+export async function healthCheck(): Promise<{ status: string; provider?: any }> {
+  const baseHealth = (import.meta as any).env?.VITE_API_BASE
+    ? `${(import.meta as any).env.VITE_API_BASE.replace(/\/api$/, '')}/health`
+    : 'http://localhost:3001/health';
+  const res = await fetch(baseHealth);
   if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
   return res.json();
 }
 
-// ─── Model API ────────────────────────────────────────────────────────────────
+// ─── Provider & Model API ─────────────────────────────────────────────────────
+
+export interface ProviderSummary {
+  id: string;
+  name: string;
+  hasCredential: boolean;
+  source: string;
+  modelCount: number;
+}
 
 export interface ModelInfo {
   id: string;
+  providerID: string;
+  modelID: string;
   name: string;
-  description?: string;
-  provider?: string;
+  family?: string;
+  status?: string;
+  contextLimit?: number;
+  outputLimit?: number;
+  capabilities?: {
+    temperature?: boolean;
+    reasoning?: boolean;
+    attachment?: boolean;
+    toolcall?: boolean;
+  };
+  cost?: {
+    input?: number;
+    output?: number;
+    cache?: number;
+  };
 }
 
-export async function listModels(): Promise<ModelInfo[]> {
-  const res = await fetch(`${API_BASE}/models`);
+export interface ProviderWithModels {
+  id: string;
+  name: string;
+  env: string[];
+  options: Record<string, unknown>;
+  source: string;
+  hasCredential: boolean;
+  models: ModelInfo[];
+}
+
+export interface ModelCatalog {
+  providers: ProviderWithModels[];
+  default: Record<string, string>;
+  fetchedAt: number;
+}
+
+export async function listProviders(): Promise<ProviderSummary[]> {
+  const res = await fetch(`${API_BASE}/providers`);
   if (!res.ok) {
     throw new Error(await parseError(res));
   }
   const { data } = await res.json();
   return data || [];
+}
+
+export async function setProviderCredential(id: string, key: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/providers/${encodeURIComponent(id)}/credential`, {
+    method: 'POST',
+    headers: getAdminHeaders(),
+    body: JSON.stringify({ key }),
+  });
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+}
+
+export async function removeProviderCredential(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/providers/${encodeURIComponent(id)}/credential`, {
+    method: 'DELETE',
+    headers: getAdminHeaders(),
+  });
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+}
+
+export async function refreshModels(): Promise<void> {
+  const res = await fetch(`${API_BASE}/models/refresh`, {
+    method: 'POST',
+    headers: getAdminHeaders(),
+  });
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+}
+
+export async function getModelCatalog(): Promise<ModelCatalog> {
+  const res = await fetch(`${API_BASE}/models`);
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+  const { data } = await res.json();
+  return data;
 }
 
 export async function getCurrentModel(): Promise<string> {
@@ -251,18 +342,6 @@ export async function setCurrentModel(model: string): Promise<void> {
   });
   if (!res.ok) {
     throw new Error(await parseError(res));
-  }
-}
-
-export async function setApiKey(mimoApiKey: string, mimoBaseUrl?: string, mimoModel?: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/admin/api-key`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mimoApiKey, mimoBaseUrl, mimoModel }),
-  });
-  if (!res.ok) {
-    const msg = await parseError(res);
-    throw new Error(msg);
   }
 }
 
@@ -377,11 +456,6 @@ export async function* streamChat(
 
 // ─── Question API ────────────────────────────────────────────────────────────
 
-/**
- * Reply to a MiMo question.
- * @param requestID The question ID from question.asked event
- * @param answers Array of answer arrays (one per question in the request)
- */
 export async function replyToQuestion(requestID: string, answers: string[][]): Promise<void> {
   const res = await fetch(`${API_BASE}/question/${requestID}/reply`, {
     method: 'POST',
@@ -393,9 +467,6 @@ export async function replyToQuestion(requestID: string, answers: string[][]): P
   }
 }
 
-/**
- * Reject a MiMo question.
- */
 export async function rejectQuestion(requestID: string): Promise<void> {
   const res = await fetch(`${API_BASE}/question/${requestID}/reject`, {
     method: 'POST',
@@ -405,9 +476,6 @@ export async function rejectQuestion(requestID: string): Promise<void> {
   }
 }
 
-/**
- * List pending MiMo questions.
- */
 export async function listQuestions(): Promise<any[]> {
   const res = await fetch(`${API_BASE}/question`);
   if (!res.ok) {
@@ -416,4 +484,3 @@ export async function listQuestions(): Promise<any[]> {
   const { data } = await res.json();
   return data || [];
 }
-

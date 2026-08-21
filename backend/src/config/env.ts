@@ -4,24 +4,6 @@ import path from 'path';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
-// Load admin-overrides.json and merge over .env values
-const overridesPath = path.resolve(process.cwd(), 'data', 'admin-overrides.json');
-try {
-  if (fs.existsSync(overridesPath)) {
-    const raw = fs.readFileSync(overridesPath, 'utf-8').trim();
-    if (raw && raw !== '{}') {
-      const overrides = JSON.parse(raw);
-      const keys = Object.keys(overrides).filter((k) => typeof overrides[k] === 'string');
-      if (keys.length > 0) {
-        console.warn(`WARNING: admin-overrides.json is active and overriding ${keys.length} key(s) from .env: [${keys.join(', ')}]`);
-        for (const key of keys) {
-          process.env[key] = overrides[key];
-        }
-      }
-    }
-  }
-} catch { /* ignore — overrides are optional */ }
-
 function parseCorsOrigin(raw: string | undefined): string[] {
   if (!raw) {
     return ['http://localhost:3000', 'http://localhost:5173'];
@@ -55,6 +37,10 @@ export interface EnvConfig {
   // mimo serve config
   mimoServePort: number;
   mimoServerPassword: string;
+  mimoRuntimeDir: string;
+  mimoBinaryPath: string;
+  mimoAuthInMemory: boolean;
+  mimoServeStartupTimeoutMs: number;
 }
 
 function loadEnv(): EnvConfig {
@@ -83,6 +69,10 @@ function loadEnv(): EnvConfig {
   const mimoDebug = process.env.MIMO_DEBUG === 'true';
   const mimoServePort = parseInt(process.env.MIMO_SERVE_PORT ?? '0', 10);
   const mimoServerPassword = process.env.MIMO_SERVER_PASSWORD ?? '';
+  const mimoRuntimeDir = process.env.MIMO_RUNTIME_DIR ?? '';
+  const mimoBinaryPath = process.env.MIMO_BINARY_PATH ?? '';
+  const mimoAuthInMemory = process.env.MIMO_AUTH_IN_MEMORY === 'true';
+  const mimoServeStartupTimeoutMs = parseInt(process.env.MIMO_SERVE_STARTUP_TIMEOUT_MS ?? '120000', 10);
 
   return {
     port,
@@ -102,6 +92,10 @@ function loadEnv(): EnvConfig {
     mimoDebug,
     mimoServePort,
     mimoServerPassword,
+    mimoRuntimeDir,
+    mimoBinaryPath,
+    mimoAuthInMemory,
+    mimoServeStartupTimeoutMs,
   };
 }
 

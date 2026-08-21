@@ -1,62 +1,70 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from 'react';
 import {
-  listModels,
+  getModelCatalog,
   getCurrentModel,
   setCurrentModel,
-  ModelInfo,
-} from "../api";
-
-const DEFAULT_MODELS: ModelInfo[] = [
-  { id: 'mimo/mimo-auto', name: 'Auto', description: 'Automatically select the best model' },
-  { id: 'xiaomi/mimo-v2.5', name: 'MiMo v2.5', description: 'Standard MiMo v2.5 model' },
-  { id: 'xiaomi/mimo-v2.5-pro', name: 'MiMo v2.5 Pro', description: 'Advanced MiMo v2.5 Pro model' },
-  { id: 'xiaomi/mimo-v2.5-pro-ultraspeed', name: 'MiMo v2.5 Pro UltraSpeed', description: 'Ultra-fast MiMo v2.5 Pro model' },
-];
+  ModelCatalog,
+  ProviderWithModels,
+} from '../api';
 
 export interface UseModelsReturn {
   model: string;
-  setModel: (model: string) => void;
-  models: ModelInfo[];
-  modelsLoading: boolean;
-  modelsError: string | null;
+  setModel: (model: string) => Promise<void>;
+  catalog: ModelCatalog | null;
+  providers: ProviderWithModels[];
+  loading: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
 }
 
 export default function useModels(): UseModelsReturn {
-  const [model, setModelState] = useState<string>('mimo/mimo-auto');
-  const [models, setModels] = useState<ModelInfo[]>([]);
-  const [modelsLoading, setModelsLoading] = useState(true);
-  const [modelsError, setModelsError] = useState<string | null>(null);
+  const [model, setModelState] = useState<string>('');
+  const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // --- Load models on mount ---
-  useEffect(() => {
-    const loadModels = async () => {
-      try {
-        const [modelsList, currentModelId] = await Promise.all([
-          listModels(),
-          getCurrentModel(),
-        ]);
-        setModels(modelsList);
-        setModelState(currentModelId);
-      } catch (err: any) {
-        // Fallback to default models
-        setModels(DEFAULT_MODELS);
-        setModelsError(err?.message || 'Failed to load models');
-      } finally {
-        setModelsLoading(false);
-      }
-    };
-    loadModels();
-  }, []);
-
-  // --- Model setter that also persists to backend ---
-  const setModel = useCallback(async (newModel: string) => {
-    setModelState(newModel);
+  const loadData = useCallback(async () => {
     try {
-      await setCurrentModel(newModel);
+      setLoading(true);
+      setError(null);
+      const [cat, currentModelId] = await Promise.all([
+        getModelCatalog(),
+        getCurrentModel(),
+      ]);
+      setCatalog(cat);
+      setModelState(currentModelId);
     } catch (err: any) {
-      setModelsError(err?.message || 'Failed to save model preference');
+      setError(err?.message || 'Failed to load models catalog');
+      setCatalog(null);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
-  return { model, setModel, models, modelsLoading, modelsError };
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const setModel = useCallback(async (newModel: string) => {
+    const previousModel = model;
+    setModelState(newModel); // optimistic update
+    try {
+      setError(null);
+      await setCurrentModel(newModel);
+    } catch (err: any) {
+      setModelState(previousModel); // revert on failure
+      setError(err?.message || 'Failed to save model preference');
+      throw err;
+    }
+  }, [model]);
+
+  return {
+    model,
+    setModel,
+    catalog,
+    providers: catalog?.providers || [],
+    loading,
+    error,
+    refresh: loadData,
+  };
 }

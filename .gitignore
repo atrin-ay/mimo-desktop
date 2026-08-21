@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.mimo-runtime/
+backend/data/
+backend/admin.json
+backend/session.json
+*.log

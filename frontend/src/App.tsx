@@ -52,7 +52,7 @@ export default function App() {
     }, 4500);
   };
 
-  const currentCategory = activeView === ActiveView.Chat ? "personal" : "projects";
+  const currentCategory = activeView === ActiveView.Chat || activeView === ActiveView.Home ? "personal" : "projects";
 
   const menuItems = [
     { view: ActiveView.Home, label: "Home", icon: Home },
@@ -140,7 +140,7 @@ export default function App() {
 
       {/* Recent & Projects Panel */}
       <AnimatePresence initial={false}>
-        {recentPanelOpen && activeView === ActiveView.Chat && (
+        {recentPanelOpen && (activeView === ActiveView.Chat || activeView === ActiveView.Home) && (
           <motion.div
             initial={{ width: 0, opacity: 0 }}
             animate={{ width: 256, opacity: 1 }}
@@ -191,7 +191,10 @@ export default function App() {
                   return (
                     <div
                       key={sub.id}
-                      onClick={() => chat.switchSubject(sub.id)}
+                      onClick={() => {
+                        chat.switchSubject(sub.id);
+                        setActiveView(ActiveView.Chat);
+                      }}
                       className={`group relative px-3 py-3 rounded-xl border transition-all duration-300 cursor-pointer ${
                         isActive
                           ? "bg-white/5 border-neural-cyan/30 text-neural-cyan"

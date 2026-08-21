@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import fs from 'fs';
 import path from 'path';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
@@ -36,6 +37,10 @@ export interface EnvConfig {
   // mimo serve config
   mimoServePort: number;
   mimoServerPassword: string;
+  mimoRuntimeDir: string;
+  mimoBinaryPath: string;
+  mimoAuthInMemory: boolean;
+  mimoServeStartupTimeoutMs: number;
 }
 
 function loadEnv(): EnvConfig {
@@ -44,8 +49,15 @@ function loadEnv(): EnvConfig {
   const corsOrigins = parseCorsOrigin(process.env.CORS_ORIGIN);
   const logLevel = process.env.LOG_LEVEL ?? 'info';
   const databasePath = process.env.DATABASE_PATH ?? './data/mimo.db';
-  const aiProvider = process.env.AI_PROVIDER ?? (process.env.MIMO_API_KEY ? 'mimo' : 'mock');
+  let aiProvider = process.env.AI_PROVIDER ?? 'mimo-serve';
   const mimoApiKey = process.env.MIMO_API_KEY ?? '';
+
+  // Safety: if AI_PROVIDER is explicitly 'mimo' but no API key is configured,
+  // fall back to mimo-serve rather than starting in a guaranteed-broken state.
+  if (aiProvider === 'mimo' && !mimoApiKey) {
+    console.warn('WARNING: AI_PROVIDER is set to "mimo" but no MIMO_API_KEY is configured — falling back to mimo-serve');
+    aiProvider = 'mimo-serve';
+  }
   const mimoBaseUrl = process.env.MIMO_BASE_URL ?? 'https://api.siliconflow.cn/v1';
   const mimoModel = process.env.MIMO_MODEL ?? 'Qwen/Qwen3-8B';
   // Context Manager config
@@ -57,6 +69,10 @@ function loadEnv(): EnvConfig {
   const mimoDebug = process.env.MIMO_DEBUG === 'true';
   const mimoServePort = parseInt(process.env.MIMO_SERVE_PORT ?? '0', 10);
   const mimoServerPassword = process.env.MIMO_SERVER_PASSWORD ?? '';
+  const mimoRuntimeDir = process.env.MIMO_RUNTIME_DIR ?? '';
+  const mimoBinaryPath = process.env.MIMO_BINARY_PATH ?? '';
+  const mimoAuthInMemory = process.env.MIMO_AUTH_IN_MEMORY === 'true';
+  const mimoServeStartupTimeoutMs = parseInt(process.env.MIMO_SERVE_STARTUP_TIMEOUT_MS ?? '120000', 10);
 
   return {
     port,
@@ -76,6 +92,10 @@ function loadEnv(): EnvConfig {
     mimoDebug,
     mimoServePort,
     mimoServerPassword,
+    mimoRuntimeDir,
+    mimoBinaryPath,
+    mimoAuthInMemory,
+    mimoServeStartupTimeoutMs,
   };
 }
 

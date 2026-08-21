@@ -1,12 +1,9 @@
 import { Router } from 'express';
-import { setApiKey } from '../controllers/adminController';
+import { requireAdminAuth } from '../middleware/adminAuth';
 
 const router = Router();
 
-/**
- * Admin routes (development convenience)
- *   POST /api/admin/api-key - set MIMO API key at runtime and persist to .env
- */
-router.post('/api-key', setApiKey);
+// All admin routes require authentication
+router.use(requireAdminAuth);
 
 export default router;

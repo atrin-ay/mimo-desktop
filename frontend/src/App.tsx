@@ -11,6 +11,7 @@ import HomeScreen from "./components/HomeScreen";
 import ChatView from "./components/ChatView";
 import DashboardSection from "./components/DashboardSection";
 import SettingsSection from "./components/SettingsSection";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 import {
   Home,
@@ -51,7 +52,7 @@ export default function App() {
     }, 4500);
   };
 
-  const currentCategory = activeView === ActiveView.Chat ? "personal" : "projects";
+  const currentCategory = activeView === ActiveView.Chat || activeView === ActiveView.Home ? "personal" : "projects";
 
   const menuItems = [
     { view: ActiveView.Home, label: "Home", icon: Home },
@@ -139,7 +140,7 @@ export default function App() {
 
       {/* Recent & Projects Panel */}
       <AnimatePresence initial={false}>
-        {recentPanelOpen && activeView === ActiveView.Chat && (
+        {recentPanelOpen && (activeView === ActiveView.Chat || activeView === ActiveView.Home) && (
           <motion.div
             initial={{ width: 0, opacity: 0 }}
             animate={{ width: 256, opacity: 1 }}
@@ -190,7 +191,10 @@ export default function App() {
                   return (
                     <div
                       key={sub.id}
-                      onClick={() => chat.switchSubject(sub.id)}
+                      onClick={() => {
+                        chat.switchSubject(sub.id);
+                        setActiveView(ActiveView.Chat);
+                      }}
                       className={`group relative px-3 py-3 rounded-xl border transition-all duration-300 cursor-pointer ${
                         isActive
                           ? "bg-white/5 border-neural-cyan/30 text-neural-cyan"
@@ -378,22 +382,24 @@ export default function App() {
                 const chatStarted = chat.messages.length > 0;
                 if (chatStarted) {
                   return (
-                    <ChatView
-                      messages={chat.messages}
-                      orbState={chat.orbState}
-                      setOrbState={chat.setOrbState}
-                      isLoading={chat.isLoading}
-                      agent={chat.agent}
-                      setAgent={chat.setAgent}
-                      model={chat.model}
-                      setModel={chat.setModel}
-                      models={chat.models}
-                      modelsLoading={chat.modelsLoading}
-                      onExecute={chat.handleExecuteCommand}
-                      onAnswer={chat.handleAnswer}
-                      onStop={chat.stopGeneration}
-                      language={language}
-                    />
+                    <ErrorBoundary fallback={<div className="flex items-center justify-center h-full text-sm text-titanium/60 font-mono p-8">Chat encountered an error. Please reload.</div>}>
+                      <ChatView
+                        messages={chat.messages}
+                        orbState={chat.orbState}
+                        setOrbState={chat.setOrbState}
+                        isLoading={chat.isLoading}
+                        agent={chat.agent}
+                        setAgent={chat.setAgent}
+                        model={chat.model}
+                        setModel={chat.setModel}
+                        models={chat.models}
+                        modelsLoading={chat.modelsLoading}
+                        onExecute={chat.handleExecuteCommand}
+                        onAnswer={chat.handleAnswer}
+                        onStop={chat.stopGeneration}
+                        language={language}
+                      />
+                    </ErrorBoundary>
                   );
                 }
                 return (

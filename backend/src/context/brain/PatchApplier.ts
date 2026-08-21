@@ -7,13 +7,14 @@ import { logger } from '../../config/logger';
 /**
  * Applies a MemoryPatch to a project brain.
  *
- * - target: state → applied immediately
- * - target: knowledge → creates a pending Suggestion (needs approval)
+ * ALL changes (both state and knowledge) are routed through the Suggestion
+ * creation/approval path. Nothing is applied directly — a human must approve
+ * every brain modification via POST /api/context/suggestions/:id/approve.
  */
 export const patchApplier = {
   /**
    * Apply a validated memory patch to a brain.
-   * Returns the number of state changes applied and suggestions created.
+   * Returns the number of suggestions created (all changes become suggestions).
    */
   apply(
     brain: ProjectBrainModel,
@@ -23,24 +24,18 @@ export const patchApplier = {
       return { stateApplied: 0, suggestionsCreated: 0 };
     }
 
-    let stateApplied = 0;
     let suggestionsCreated = 0;
 
     for (const change of patch.changes) {
       try {
-        if (change.target === 'state') {
-          this.applyStateChange(brain, change);
-          stateApplied++;
-        } else if (change.target === 'knowledge') {
-          this.createSuggestion(brain, change, patch.reason);
-          suggestionsCreated++;
-        }
+        this.createSuggestion(brain, change, patch.reason);
+        suggestionsCreated++;
       } catch (err) {
-        logger.error({ err, change }, 'Failed to apply patch change');
+        logger.error({ err, change }, 'Failed to create suggestion');
       }
     }
 
-    return { stateApplied, suggestionsCreated };
+    return { stateApplied: 0, suggestionsCreated };
   },
 
   /** Apply a state change directly to the brain. */

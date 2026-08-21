@@ -355,6 +355,22 @@ The most architecturally complex subsystem:
 - Debounced at 8 seconds with coalescing (burst = one update)
 - Memory agent has 30-second timeout with graceful degradation
 
+### 7.6 Memory Architecture: ProjectBrain vs. MiMoCode Native Memory
+
+This app's ProjectBrain system and MiMoCode's native memory system (MEMORY.md, checkpoint.md, dream/distill) are **not duplicates** — they serve different scopes and are not interreachable under the current integration mode.
+
+**Key facts (confirmed by direct investigation):**
+
+1. **MiMoCode's native memory is NOT reachable via `mimo serve`'s HTTP API.** The serve API exposes session management, message passing, SSE events, and question handling — but zero memory-related endpoints (`/memory`, `/dream`, `/distill`, `/checkpoint` do not exist). Session creation does not accept a working directory parameter, so memory cannot be scoped to a project via HTTP.
+
+2. **ProjectBrain is this app's sole project-memory mechanism** under the current serve-based integration approach. It stores structured state (current goal, tasks, progress) and knowledge (decisions, architecture, conventions, rules, user preferences) in SQLite, patch-applied via the MemoryAgent, and approval-gated via SuggestionService.
+
+3. **The two systems operate in separate storage domains:** ProjectBrain writes to SQLite (`project_brain` table) and mirrors to `backend/data/project-brain/<projectId>/`. MiMoCode native memory writes to `~/.local/share/mimocode/memory/` (XDG data directory). They do not conflict.
+
+4. **This conclusion should be revisited only if the app's integration mode changes** — for example, if it ever invokes MiMoCode via CLI (`mimo run`) instead of or alongside `mimo serve`, or if MiMoCode's serve API adds memory endpoints in the future.
+
+> Full evidence and methodology documented in `docs/adr/003-sdk-memory-integration-findings.md`.
+
 ---
 
 ## 8. External Dependencies

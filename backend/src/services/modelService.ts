@@ -1,134 +1,221 @@
 import { getProvider } from '../providers';
 import { logger } from '../config/logger';
-import { env } from '../config/env';
+import { MimoLocalClient, type MimoProvidersResponse } from '../mimo/client';
+import getDatabase from '../storage/database';
 
-/** A model that can be used with MiMo CLI. */
-export interface ModelInfo {
+export interface ProviderWithModels {
   id: string;
   name: string;
-  description?: string;
-  provider?: string;
+  env: string[];
+  options: Record<string, unknown>;
+  source: string;
+  hasCredential: boolean;
+  models: ModelInfo[];
 }
 
-/** Default model when none is selected. */
-const DEFAULT_MODEL = 'mimo/mimo-auto';
+export interface ModelInfo {
+  id: string;
+  providerID: string;
+  modelID: string;
+  name: string;
+  family?: string;
+  status?: string;
+  contextLimit?: number;
+  outputLimit?: number;
+  capabilities?: {
+    temperature?: boolean;
+    reasoning?: boolean;
+    attachment?: boolean;
+    toolcall?: boolean;
+  };
+  cost?: {
+    input?: number;
+    output?: number;
+    cache?: number | { read?: number; write?: number };
+  };
+}
 
-/** Cache for models list (refreshed every 5 minutes). */
-let cachedModels: ModelInfo[] = [];
-let cacheTimestamp = 0;
-const CACHE_TTL_MS = 5 * 60 * 1000;
+export interface ModelCatalog {
+  providers: ProviderWithModels[];
+  default: Record<string, string>;
+  fetchedAt: number;
+}
 
-/**
- * Fetch available models from the MiMo CLI.
- * Uses `mimo models` command which returns one model ID per line.
- */
-async function fetchModelsFromCli(): Promise<ModelInfo[]> {
-  const provider = getProvider() as any;
-
-  try {
-    const result = await provider.runCommand(['models']);
-    const output = result.stdout.trim();
-
-    if (!output) {
-      logger.warn('No models returned from MiMo CLI');
-      return getDefaultModels();
-    }
-
-    const modelIds = output
-      .split('\n')
-      .map((line: string) => line.trim())
-      .filter((line: string) => line && !line.startsWith(' '));
-
-    return modelIds.map((modelId: string) => ({
-      id: modelId,
-      name: formatModelName(modelId),
-      description: getModelDescription(modelId),
-      provider: modelId.split('/')[0],
-    }));
-  } catch (err) {
-    logger.error({ err }, 'Failed to fetch models from MiMo CLI');
-    return getDefaultModels();
+export class ProviderNotReadyError extends Error {
+  code = 'provider_not_ready';
+  constructor(message = 'MiMo Code provider is not ready or uninitialized') {
+    super(message);
+    this.name = 'ProviderNotReadyError';
   }
 }
 
-/** Format model ID to a readable name. */
-function formatModelName(modelId: string): string {
-  const parts = modelId.split('/');
-  const name = parts[parts.length - 1];
-  return name
-    .replace(/-/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+export class UnknownModelError extends Error {
+  code = 'unknown_model';
+  constructor(modelId: string) {
+    super(`Unknown or invalid model ID: "${modelId}"`);
+    this.name = 'UnknownModelError';
+  }
 }
 
-/** Get optional description for known models. */
-function getModelDescription(modelId: string): string {
-  const descriptions: Record<string, string> = {
-    'mimo/mimo-auto': 'Automatically select the best model',
-    'xiaomi/mimo-v2.5': 'Standard MiMo v2.5 model',
-    'xiaomi/mimo-v2.5-pro': 'Advanced MiMo v2.5 Pro model',
-    'xiaomi/mimo-v2.5-pro-ultraspeed': 'Ultra-fast MiMo v2.5 Pro model',
-  };
-  return descriptions[modelId] || '';
-}
-
-/** Fallback models if CLI is unavailable. */
-function getDefaultModels(): ModelInfo[] {
-  return [
-    { id: 'mimo/mimo-auto', name: 'Auto', description: 'Automatically select the best model', provider: 'mimo' },
-    { id: 'xiaomi/mimo-v2.5', name: 'MiMo v2.5', description: 'Standard MiMo v2.5 model', provider: 'xiaomi' },
-    { id: 'xiaomi/mimo-v2.5-pro', name: 'MiMo v2.5 Pro', description: 'Advanced MiMo v2.5 Pro model', provider: 'xiaomi' },
-    { id: 'xiaomi/mimo-v2.5-pro-ultraspeed', name: 'MiMo v2.5 Pro UltraSpeed', description: 'Ultra-fast MiMo v2.5 Pro model', provider: 'xiaomi' },
-  ];
-}
-
-/** Current session model (in-memory, resets on server restart). */
-let currentModel: string = DEFAULT_MODEL;
+let cachedCatalog: ModelCatalog | null = null;
+let cacheTimestamp = 0;
+const CACHE_TTL_MS = 5 * 60 * 1000;
 
 export const modelService = {
-  /** Get all available models. */
-  async getModels(): Promise<ModelInfo[]> {
+  invalidate(): void {
+    cachedCatalog = null;
+    cacheTimestamp = 0;
+  },
+
+  async getCatalog(): Promise<ModelCatalog> {
     const now = Date.now();
-    if (cachedModels.length > 0 && now - cacheTimestamp < CACHE_TTL_MS) {
-      return cachedModels;
+    if (cachedCatalog && now - cacheTimestamp < CACHE_TTL_MS) {
+      return cachedCatalog;
     }
 
-    cachedModels = await fetchModelsFromCli();
+    const provider = getProvider() as any;
+    if (!provider || !provider.isReady || !provider.url) {
+      throw new ProviderNotReadyError('MiMo serve instance is not ready or starting.');
+    }
+
+    const client = new MimoLocalClient(provider.url, provider.servePassword);
+    let raw: MimoProvidersResponse;
+    try {
+      raw = await client.getProviders();
+    } catch (err: any) {
+      throw new ProviderNotReadyError(`Failed to fetch providers catalog from local serve: ${err.message}`);
+    }
+
+    const providers: ProviderWithModels[] = [];
+    for (const provData of raw.providers) {
+      const provId = provData.id;
+      const modelsList: ModelInfo[] = [];
+      const hasCredential = provData.source !== 'none' && (Object.keys(provData.models).length > 0 || provData.source === 'config' || provData.source === 'auth');
+
+      for (const [modKey, modVal] of Object.entries(provData.models)) {
+        const canonicalId = `${provId}/${modVal.id || modKey}`;
+        modelsList.push({
+          id: canonicalId,
+          providerID: provId,
+          modelID: modVal.id || modKey,
+          name: modVal.name || modKey,
+          family: modVal.family,
+          status: modVal.status || 'active',
+          contextLimit: modVal.limit?.context,
+          outputLimit: modVal.limit?.output,
+          capabilities: modVal.capabilities,
+          cost: modVal.cost,
+        });
+      }
+
+      // Sort models: active before beta, then by name
+      modelsList.sort((a, b) => {
+        if (a.status === 'active' && b.status !== 'active') return -1;
+        if (a.status !== 'active' && b.status === 'active') return 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      providers.push({
+        id: provId,
+        name: provData.name || provId,
+        env: provData.env || [],
+        options: provData.options || {},
+        source: provData.source,
+        hasCredential,
+        models: modelsList,
+      });
+    }
+
+    // Sort providers by name
+    providers.sort((a, b) => a.name.localeCompare(b.name));
+
+    cachedCatalog = {
+      providers,
+      default: raw.default || {},
+      fetchedAt: now,
+    };
     cacheTimestamp = now;
-    logger.info({ count: cachedModels.length }, 'Models loaded');
-    return cachedModels;
+
+    logger.info({ providerCount: providers.length }, 'Model catalog successfully cached');
+    return cachedCatalog;
   },
 
-  /** Get the currently selected model. */
-  getCurrentModel(): string {
-    return currentModel;
-  },
-
-  /** Set the current model. */
-  setCurrentModel(modelId: string): void {
-    currentModel = modelId;
-  },
-
-  /** Validate a model ID exists in the available models. */
-  async validateModel(modelId: string): Promise<boolean> {
-    const models = await this.getModels();
-    return models.some((m) => m.id === modelId);
-  },
-
-  /** Get default model ID. */
-  getDefaultModel(): string {
-    return DEFAULT_MODEL;
-  },
-
-  /** Resolve model ID with fallback to default. */
-  async resolveModel(modelId?: string): Promise<string> {
-    if (!modelId) return currentModel;
-
-    if (await this.validateModel(modelId)) {
-      return modelId;
+  async getCurrentModel(): Promise<string> {
+    const db = getDatabase();
+    const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get('selected_model') as { value: string } | undefined;
+    if (row && row.value) {
+      if (await this.isKnownModel(row.value)) {
+        return row.value;
+      }
     }
 
-    logger.warn({ modelId }, 'Invalid model, falling back to default');
-    return currentModel;
+    // Fallback to catalog default
+    try {
+      const catalog = await this.getCatalog();
+      // Pick first default or first model available
+      const defaults = catalog.default;
+      const firstProv = Object.keys(defaults)[0];
+      if (firstProv && defaults[firstProv]) {
+        const defModel = `${firstProv}/${defaults[firstProv]}`;
+        await this.setCurrentModel(defModel);
+        return defModel;
+      }
+
+      for (const p of catalog.providers) {
+        if (p.models.length > 0) {
+          const fallback = p.models[0].id;
+          await this.setCurrentModel(fallback);
+          return fallback;
+        }
+      }
+    } catch {}
+
+    return 'xiaomi/mimo-v2.5';
+  },
+
+  async setCurrentModel(modelId: string): Promise<void> {
+    if (!await this.isKnownModel(modelId)) {
+      throw new UnknownModelError(modelId);
+    }
+    const db = getDatabase();
+    db.prepare(`
+      INSERT INTO app_settings (key, value, updated_at)
+      VALUES ('selected_model', ?, datetime('now'))
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `).run(modelId);
+  },
+
+  async isKnownModel(modelId: string): Promise<boolean> {
+    try {
+      const catalog = await this.getCatalog();
+      for (const p of catalog.providers) {
+        if (p.models.some((m) => m.id === modelId)) {
+          return true;
+        }
+      }
+    } catch {}
+    return false;
+  },
+
+  async resolveModel(modelId?: string): Promise<{ providerID: string; modelID: string }> {
+    const targetId = modelId || (await this.getCurrentModel());
+    const slashIdx = targetId.indexOf('/');
+    if (slashIdx === -1) {
+      throw new UnknownModelError(targetId);
+    }
+
+    const providerID = targetId.substring(0, slashIdx);
+    const modelID = targetId.substring(slashIdx + 1);
+
+    if (!providerID || !modelID) {
+      throw new UnknownModelError(targetId);
+    }
+
+    if (!await this.isKnownModel(targetId)) {
+      throw new UnknownModelError(targetId);
+    }
+
+    return { providerID, modelID };
   },
 };
 

@@ -3,7 +3,7 @@
  */
 
 /** Message author role. */
-export type MessageRole = 'user' | 'assistant';
+export type MessageRole = 'user' | 'assistant' | 'context';
 
 /** A single chat message persisted in the database. */
 export interface Message {
@@ -24,6 +24,7 @@ export interface Session {
 export interface ProviderMessage {
   role: MessageRole;
   content: string;
+  metadata?: Record<string, unknown>;
 }
 
 /** Result returned by an AI provider after sending a message. */

@@ -3,7 +3,7 @@ import { messageRepository } from '../storage/messageRepository';
 import { getDatabase } from '../storage/database';
 import { getProvider } from '../providers';
 import { contextManager } from '../context/ContextManager';
-import { NotFoundError, InternalServerError } from '../middleware/errors';
+import { NotFoundError, HttpError } from '../middleware/errors';
 import { logger } from '../config/logger';
 import type { ChatResponse, Message, MiMoAgent, ProviderMessage } from '../types';
 
@@ -52,7 +52,7 @@ export const chatService = {
     const provider = getProvider();
     let result;
     try {
-      result = await provider.sendMessage(requestHistory, agent, model);
+      result = await provider.sendMessage(sessionId, requestHistory, agent, model);
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       logger.error(
@@ -60,10 +60,20 @@ export const chatService = {
         'Provider failed to generate a response',
       );
 
-      throw new InternalServerError(
-        detail || 'AI provider failed to generate a response',
-        { provider: provider.name },
-      );
+      // Map known failure types to appropriate HTTP status codes with safe
+      // generic messages. Full error detail is logged server-side only.
+      const lower = detail.toLowerCase();
+      if (/timeout|timed out/i.test(lower)) {
+        throw new HttpError(504, 'TIMEOUT', 'The AI provider timed out. Please try again.', { provider: provider.name });
+      }
+      if (/rate.?limit|429|too many requests/i.test(lower)) {
+        throw new HttpError(429, 'RATE_LIMITED', 'Too many requests. Please wait and try again.', { provider: provider.name });
+      }
+      if (/connection refused|econnrefused|econnreset|fetch failed/i.test(lower)) {
+        throw new HttpError(502, 'PROVIDER_UNAVAILABLE', 'The AI provider is temporarily unavailable.', { provider: provider.name });
+      }
+
+      throw new HttpError(500, 'PROVIDER_ERROR', 'AI provider failed to generate a response.', { provider: provider.name });
     }
 
     // 7. Persist both messages atomically.

@@ -19,17 +19,20 @@ const MEMORY_TIMEOUT_MS = 30000; // 30 seconds timeout for memory operations
 export class ChatProviderMemoryAdapter implements MemoryProvider {
   readonly name = 'chat-provider-adapter';
 
-  async complete(prompt: string): Promise<string> {
+  async complete(prompt: string, projectId: string): Promise<string> {
     const provider = getProvider();
 
-    // Send the prompt as a single user message with timeout
+    // Send the prompt as a single user message with timeout.
+    // conversationId is scoped to projectId so memory calls for different
+    // projects do not share a provider-side session.
+    const conversationId = `__memory_agent__:${projectId}`;
     const messages: ProviderMessage[] = [
       { role: 'user', content: prompt },
     ];
 
     try {
       const result = await Promise.race([
-        provider.sendMessage(messages),
+        provider.sendMessage(conversationId, messages),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error('Memory provider timeout')), MEMORY_TIMEOUT_MS)
         ),

@@ -8,7 +8,9 @@ import type {
 export class MockProvider implements AIProvider {
   readonly name = 'mock';
 
-  async sendMessage(messages: ProviderMessage[]): Promise<ProviderResult> {
+  async sendMessage(conversationId: string, messages: ProviderMessage[]): Promise<ProviderResult> {
+    // conversationId is unused — MockProvider is stateless.
+    void conversationId;
     const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user');
     const content = lastUserMessage
       ? `Mock response: ${lastUserMessage.content}`

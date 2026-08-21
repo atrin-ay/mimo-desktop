@@ -12,6 +12,7 @@ import {
 import { OrbState, ActiveView, Goal, AgentName } from "../types";
 import { translations } from "../utils/translations";
 import Orb from "./Orb";
+import ErrorBoundary from "./ErrorBoundary";
 
 interface HomeScreenProps {
   orbState: OrbState;
@@ -154,7 +155,9 @@ export default function HomeScreen({
           </AnimatePresence>
           <div className="absolute w-[280px] h-[280px] rounded-full border border-dashed border-white/5 animate-spin" style={{ animationDuration: "120s" }} />
           <div className="absolute w-[320px] h-[320px] rounded-full border border-dotted border-neural-cyan/3 animate-spin" style={{ animationDuration: "180s", animationDirection: "reverse" }} />
-          <Orb state={orbState} size={260} onClick={() => {}} />
+          <ErrorBoundary fallback={<div className="w-[260px] h-[260px] flex items-center justify-center rounded-full bg-white/5 border border-white/10 text-xs text-titanium/60 font-mono">Orb offline</div>}>
+            <Orb state={orbState} size={260} onClick={() => {}} />
+          </ErrorBoundary>
         </div>
 
         <motion.div

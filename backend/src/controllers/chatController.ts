@@ -16,10 +16,7 @@ export async function sendMessage(
   next: NextFunction,
 ): Promise<void> {
   try {
-    const sessionId = req.body.sessionId as string;
-    const message = req.body.message as string;
-    const agent = req.body.agent as MiMoAgent | undefined;
-    const model = req.body.model as string | undefined;
+    const { sessionId, message, agent, model } = req.body;
 
     const result = await chatService.sendMessage(sessionId, message, agent, model);
     const body: ApiResponse<ChatResponse> = { data: result };
@@ -36,17 +33,9 @@ export async function streamMessage(
   next: NextFunction,
 ): Promise<void> {
   try {
-    const sessionId = req.body.sessionId as string;
-    const userContent = req.body.message as string;
-    const agent = req.body.agent as MiMoAgent | undefined;
-    const model = req.body.model as string | undefined;
+    const { sessionId, message: userContent, agent, model } = req.body;
 
     logger.info({ sessionId, agent, messageLength: userContent.length }, 'Chat stream request received');
-
-    if (!sessionId || !userContent) {
-      res.status(400).json({ error: { code: 'invalid_input', message: 'sessionId and message are required' } });
-      return;
-    }
 
     // Validate session exists
     const session = sessionRepository.findById(sessionId);
@@ -99,7 +88,7 @@ export async function streamMessage(
       // Use streaming provider
       let assistantText = '';
       try {
-        await provider.sendMessageStream(requestHistory, agent, (event: any) => {
+        await provider.sendMessageStream(sessionId, requestHistory, agent, (event: any) => {
           // Debug log all events
           if (env.mimoDebug) {
             logger.debug({ type: event.type, sessionID: event.sessionID }, '[MiMo Event]');
@@ -154,14 +143,18 @@ export async function streamMessage(
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         logger.error({ err, sessionId }, 'Streaming provider error');
-        res.write(`data: ${JSON.stringify({ type: 'error', message: errorMsg, timestamp: Date.now() })}\n\n`);
+        if (res.headersSent) {
+          res.write(`data: ${JSON.stringify({ type: 'fatal_error', code: 'PROVIDER_ERROR', message: 'Provider stream failed', timestamp: Date.now() })}\n\n`);
+        } else {
+          res.status(502).json({ error: { code: 'PROVIDER_ERROR', message: 'AI provider failed to generate a response' } });
+        }
       }
     } else {
       // Fallback: use non-streaming provider and emit events manually
       res.write(`data: ${JSON.stringify({ type: 'state', state: 'thinking', label: 'Analyzing...', timestamp: Date.now() })}\n\n`);
 
       try {
-        const result = await provider.sendMessage(requestHistory, agent, model);
+        const result = await provider.sendMessage(sessionId, requestHistory, agent, model);
 
         // Emit text event
         res.write(`data: ${JSON.stringify({ type: 'text', text: result.content, timestamp: Date.now() })}\n\n`);
@@ -180,12 +173,18 @@ export async function streamMessage(
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         logger.error({ err, sessionId }, 'Provider error');
-        res.write(`data: ${JSON.stringify({ type: 'error', message: errorMsg, timestamp: Date.now() })}\n\n`);
+        if (res.headersSent) {
+          res.write(`data: ${JSON.stringify({ type: 'fatal_error', code: 'PROVIDER_ERROR', message: 'Provider stream failed', timestamp: Date.now() })}\n\n`);
+        } else {
+          res.status(502).json({ error: { code: 'PROVIDER_ERROR', message: 'AI provider failed to generate a response' } });
+        }
       }
     }
 
-    res.write(`data: ${JSON.stringify({ type: 'end', timestamp: Date.now() })}\n\n`);
-    res.end();
+    if (res.headersSent) {
+      res.write(`data: ${JSON.stringify({ type: 'end', timestamp: Date.now() })}\n\n`);
+      res.end();
+    }
   } catch (err) {
     next(err);
   }

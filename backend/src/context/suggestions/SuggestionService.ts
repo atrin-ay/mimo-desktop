@@ -26,7 +26,7 @@ export const suggestionService = {
     return suggestionRepository.findById(id);
   },
 
-  /** Approve a suggestion — apply it to the brain's knowledge. */
+  /** Approve a suggestion — apply it to the brain's state or knowledge. */
   approve(id: string): boolean {
     const suggestion = suggestionRepository.findById(id);
     if (!suggestion || suggestion.status !== 'pending') {
@@ -35,10 +35,15 @@ export const suggestionService = {
 
     const brain = ProjectBrainModel.load(suggestion.projectId);
 
-    // Apply the knowledge change
-    brain.updateKnowledge((knowledge) => {
-      this.applyKnowledgeChange(knowledge, suggestion);
-    });
+    if (suggestion.target === 'state') {
+      brain.updateState((state) => {
+        this.applyStateChange(state, suggestion);
+      });
+    } else {
+      brain.updateKnowledge((knowledge) => {
+        this.applyKnowledgeChange(knowledge, suggestion);
+      });
+    }
 
     // Save brain and mirror
     brain.save();
@@ -47,7 +52,7 @@ export const suggestionService = {
     // Mark suggestion as approved
     suggestionRepository.updateStatus(id, 'approved');
 
-    logger.info({ suggestionId: id, projectId: suggestion.projectId }, 'Suggestion approved');
+    logger.info({ suggestionId: id, projectId: suggestion.projectId, target: suggestion.target }, 'Suggestion approved');
     return true;
   },
 
@@ -61,6 +66,133 @@ export const suggestionService = {
     suggestionRepository.updateStatus(id, 'ignored');
     logger.info({ suggestionId: id }, 'Suggestion ignored');
     return true;
+  },
+
+  /** Apply a state change from a suggestion to the brain's state. */
+  applyStateChange(
+    state: import('../types').BrainState,
+    suggestion: Suggestion,
+  ): void {
+    const { section, operation, value } = suggestion;
+    let parsedValue: unknown;
+
+    try {
+      parsedValue = JSON.parse(value);
+    } catch {
+      parsedValue = value;
+    }
+
+    switch (section) {
+      case 'currentGoal':
+      case 'currentTask':
+      case 'currentFile':
+      case 'nextStep':
+      case 'activeFeature':
+      case 'sessionProgress':
+        if (operation === 'replace' || operation === 'update') {
+          (state as unknown as Record<string, unknown>)[section] = parsedValue ?? null;
+        }
+        break;
+
+      case 'tasks':
+        this.applyTasksChange(state, operation, parsedValue, suggestion);
+        break;
+
+      case 'knownIssues':
+        this.applyKnownIssuesChange(state, operation, parsedValue, suggestion);
+        break;
+
+      default:
+        logger.warn({ section }, 'Unknown state section in suggestion');
+    }
+  },
+
+  /** Apply changes to the tasks array from a suggestion. */
+  applyTasksChange(
+    state: import('../types').BrainState,
+    operation: string,
+    value: unknown,
+    suggestion: Suggestion,
+  ): void {
+    switch (operation) {
+      case 'append':
+        if (typeof value === 'object' && value !== null && 'title' in value) {
+          const task = value as { title: string; status?: string };
+          state.tasks.push({
+            id: `sug_${suggestion.id}`,
+            title: task.title,
+            status: (task.status as 'todo' | 'doing' | 'done') || 'todo',
+          });
+        }
+        break;
+
+      case 'complete':
+        try {
+          const match = JSON.parse(suggestion.value);
+          if (match && typeof match === 'object') {
+            const idx = state.tasks.findIndex((t) => {
+              for (const [key, val] of Object.entries(match)) {
+                if ((t as any)[key] !== val) return false;
+              }
+              return true;
+            });
+            if (idx !== -1) {
+              state.tasks[idx].status = 'done';
+            }
+          }
+        } catch { /* ignore parse errors */ }
+        break;
+
+      case 'remove':
+        try {
+          const match = JSON.parse(suggestion.value);
+          if (match && typeof match === 'object') {
+            state.tasks = state.tasks.filter((t) => {
+              for (const [key, val] of Object.entries(match)) {
+                if ((t as any)[key] === val) return false;
+              }
+              return true;
+            });
+          }
+        } catch { /* ignore parse errors */ }
+        break;
+    }
+  },
+
+  /** Apply changes to the knownIssues array from a suggestion. */
+  applyKnownIssuesChange(
+    state: import('../types').BrainState,
+    operation: string,
+    value: unknown,
+    suggestion: Suggestion,
+  ): void {
+    switch (operation) {
+      case 'append':
+        if (typeof value === 'object' && value !== null && 'title' in value) {
+          const issue = value as { title: string; severity?: string; status?: string };
+          state.knownIssues.push({
+            id: `sug_${suggestion.id}`,
+            title: issue.title,
+            severity: (issue.severity as 'low' | 'medium' | 'high' | 'critical') || 'medium',
+            status: (issue.status as 'open' | 'resolved') || 'open',
+          });
+        }
+        break;
+
+      case 'remove':
+        try {
+          const match = JSON.parse(suggestion.value);
+          if (match && typeof match === 'object') {
+            state.knownIssues = state.knownIssues.filter((i) => {
+              for (const [key, val] of Object.entries(match)) {
+                if ((i as any)[key] === val) return false;
+              }
+              return true;
+            });
+          }
+        } catch { /* ignore parse errors */ }
+        break;
+    }
   },
 
   /** Apply a knowledge change from a suggestion to the brain's knowledge. */

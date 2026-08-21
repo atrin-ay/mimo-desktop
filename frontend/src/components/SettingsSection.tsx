@@ -1,8 +1,6 @@
-import { useState, useEffect } from "react";
-import { motion } from "motion/react";
+import { useState } from "react";
 import { 
   Settings, 
-  User, 
   Brain, 
   Terminal, 
   Bell, 
@@ -10,8 +8,13 @@ import {
   Link as LinkIcon, 
   Palette, 
   CheckCircle,
-  Compass
+  Compass,
+  Key,
+  Trash2,
+  RefreshCw,
+  AlertTriangle
 } from "lucide-react";
+import useProviders from "../hooks/useProviders";
 
 interface SettingsSectionProps {
   language: "en" | "fa";
@@ -39,16 +42,13 @@ const settingsTranslations = {
     systemLang: "System Language Base",
     systemLangSub: "Configured globally (EN/FA switch on top right header)",
     
-    aiPref: "AI Core Preferences",
-    aiPrefSub: "Calibrate the behavior, reasoning levels, and specific agent filters.",
-    defaultLLM: "Default Large Language Model",
-    reasoningMode: "Continuous Reasoning Mode",
-    reasoningModeSub: "Allows the model to think extensively before emitting results.",
-    responseStyle: "Response Synthesis Style",
-    responseStyleConcise: "Concise & Direct (Speed)",
-    responseStyleVerbose: "Comprehensive & Structured",
-    responseStyleCode: "Technical & Code-centric",
-    activeAgents: "Active Specialized Agents",
+    aiPref: "AI Core & Provider Credentials",
+    aiPrefSub: "Configure isolated project MiMo Code provider keys and reasoning preferences.",
+    providersTitle: "Configured Providers",
+    providersSub: "API keys are stored securely in the project-local runtime auth.json.",
+    addKey: "Add / Update Key",
+    removeKey: "Revoke",
+    refreshModelsBtn: "Refresh Models Catalog",
     
     skillsTitle: "Installed Skills",
     skillsSub: "Skill bundles can be invoked instantly inside any conversation using slash commands.",
@@ -77,7 +77,7 @@ const settingsTranslations = {
     centralizedControl: "Centralized Integration Control",
     centralizedDesc: "You can manage all linked APIs, sync settings, calendar pipelines, and Drive folders directly within the Integrations tab.",
     
-    saveNotice: "PREFERENCES PERSIST TO LOCAL SANDBOX STORAGE HORIZON",
+    saveNotice: "PROJECT-LOCAL ISOLATED RUNTIME ACTIVE",
     saved: "Saved"
   },
   fa: {
@@ -99,16 +99,13 @@ const settingsTranslations = {
     systemLang: "زبان پیش‌فرض هسته سیستم",
     systemLangSub: "تنظیم به صورت سراسری (با دکمه سوئیچر EN/FA در منوی بالای صفحه)",
     
-    aiPref: "ترجیحات هسته هوش مصنوعی",
-    aiPrefSub: "کالیبره کردن رفتار، میزان استدلال عمیق و فیلترهای عاملی.",
-    defaultLLM: "مدل زبانی بزرگ پیش‌فرض",
-    reasoningMode: "حالت استدلال مداوم چند مرحله‌ای",
-    reasoningModeSub: "به مدل اجازه می‌دهد قبل از ارائه پاسخ، عمیقاً تفکر کند.",
-    responseStyle: "سبک سنتز و پاسخ‌دهی",
-    responseStyleConcise: "کوتاه و دقیق (حداکثر سرعت)",
-    responseStyleVerbose: "جامع و ساختاریافته (توضیحی)",
-    responseStyleCode: "فنی و متمرکز بر کدهای تمیز",
-    activeAgents: "عامل‌های تخصصی فعال در حافظه",
+    aiPref: "هسته هوش مصنوعی و کلیدهای ارائه‌دهنده",
+    aiPrefSub: "تنظیم کلیدهای ارائه‌دهنده ایزوله پروژه و ترجیحات استدلال.",
+    providersTitle: "ارائه‌دهندگان پیکربندی‌شده",
+    providersSub: "کلیدهای API به صورت امن در فایل auth.json زمان اجرای محلی پروژه ذخیره می‌شوند.",
+    addKey: "افزودن / به‌روزرسانی کلید",
+    removeKey: "حذف کلید",
+    refreshModelsBtn: "بازخوانی کاتالوگ مدل‌ها",
     
     skillsTitle: "مهارت‌های نصب‌شده سیستم",
     skillsSub: "بسته‌های مهارتی را می‌توان بلافاصله در هر گفتگو با استفاده از دستورات اسلش (/) فراخوانی کرد.",
@@ -136,41 +133,29 @@ const settingsTranslations = {
     connectedSub: "مدیریت کانال‌های اتصال استاندارد API، توکن‌های اسلک یا گیت‌هاب.",
     centralizedControl: "کنترل یکپارچه اتصال‌ها",
     centralizedDesc: "شما می‌توانید تمام APIهای متصل، تنظیمات همگام‌سازی، تقویم‌ها و پوشه‌های گوگل درایو را مستقیماً در برگه «اتصال‌ها و ابزارها» مدیریت کنید.",
-    
-    saveNotice: "تمامی اولویت‌ها در افق ذخیره‌سازی ابری سندباکس پایدار ذخیره می‌شوند",
+    saveNotice: "زمان اجرای محلی پروژه ایزوله فعال است",
     saved: "ذخیره شد"
   }
 };
 
 export default function SettingsSection({ language, theme = "dark", setTheme }: SettingsSectionProps) {
   const [activeTab, setActiveTab] = useState<"general" | "ai" | "skills" | "notifications" | "privacy" | "connected">("general");
-  const [accentColor, setAccentColor] = useState("#5DF7FF"); // default neural cyan
-  const [defaultModel, setDefaultModel] = useState("Gemini 2.5 Flash");
+  const [accentColor, setAccentColor] = useState("#5DF7FF");
   const [reasoningMode, setReasoningMode] = useState(true);
   const [responseStyle, setResponseStyle] = useState("concise");
-  const [mimoApiKey, setMimoApiKey] = useState('');
-  const [mimoBaseUrl, setMimoBaseUrl] = useState('https://api.siliconflow.cn/v1');
-  const [mimoModel, setMimoModel] = useState('Qwen/Qwen3-8B');
-  const [savingKey, setSavingKey] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [savedOk, setSavedOk] = useState(false);
-  
+
+  const { providers, loading: provLoading, error: provError, addCredential, removeCredential, refreshing, refreshCatalog } = useProviders();
+  const [selectedProviderId, setSelectedProviderId] = useState<string>('');
+  const [credentialKey, setCredentialKey] = useState<string>('');
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+
   const [emailNotif, setEmailNotif] = useState(true);
   const [desktopNotif, setDesktopNotif] = useState(false);
   const [dataRetention, setDataRetention] = useState("30");
 
   const isRtl = language === "fa";
   const st = settingsTranslations[language];
-
-  useEffect(() => {
-    try {
-      setMimoApiKey(localStorage.getItem('mimo_api_key') ?? '');
-      setMimoBaseUrl(localStorage.getItem('mimo_base_url') ?? 'https://api.siliconflow.cn/v1');
-      setMimoModel(localStorage.getItem('mimo_model') ?? 'Qwen/Qwen3-8B');
-    } catch {
-      // ignore
-    }
-  }, []);
 
   const [skills, setSkills] = useState([
     { 
@@ -228,7 +213,6 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
   return (
     <div className="w-full max-w-7xl mx-auto px-4 py-6 md:px-8 select-none" dir={isRtl ? "rtl" : "ltr"}>
       
-      {/* Header section */}
       <div className={`flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 pb-4 border-b border-white/5 ${textAlignment}`}>
         <div>
           <h2 className="text-xl font-display font-medium text-white flex items-center gap-2">
@@ -243,7 +227,6 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
 
       <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-stretch">
         
-        {/* Left Side Tab Navigation */}
         <div className="md:col-span-4 lg:col-span-3 flex flex-col gap-1.5 p-2 bg-white/[0.01] border border-white/5 rounded-2xl">
           {tabs.map(tab => {
             const IconComponent = tab.icon;
@@ -267,11 +250,9 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
           })}
         </div>
 
-        {/* Right Side Content Pane */}
         <div className="md:col-span-8 lg:col-span-9 p-6 bg-white/[0.02] border border-white/5 rounded-2xl flex flex-col justify-between min-h-[450px]">
           
           <div className={`space-y-6 ${textAlignment}`}>
-            {/* GENERAL TAB */}
             {activeTab === "general" && (
               <div className="space-y-6">
                 <div>
@@ -280,7 +261,6 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
                 </div>
 
                 <div className="space-y-4 pt-2">
-                  {/* Theme Select */}
                   <div className="flex justify-between items-center py-2.5 border-b border-white/5">
                     <span className="text-xs font-semibold text-white/80">{st.appearanceTheme}</span>
                     <select 
@@ -293,7 +273,6 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
                     </select>
                   </div>
 
-                  {/* Accent Colors */}
                   <div className="flex justify-between items-center py-2.5 border-b border-white/5">
                     <span className="text-xs font-semibold text-white/80">{st.accentColorPath}</span>
                     <div className="flex gap-2">
@@ -319,7 +298,6 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
                     </div>
                   </div>
 
-                  {/* System Audio Feedback */}
                   <div className="flex justify-between items-center py-2.5">
                     <span className="text-xs font-semibold text-white/80">{st.systemLang}</span>
                     <span className="text-xs text-titanium/50 font-mono">
@@ -330,7 +308,6 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
               </div>
             )}
 
-            {/* AI PREFERENCES TAB */}
             {activeTab === "ai" && (
               <div className="space-y-6">
                 <div>
@@ -339,25 +316,10 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
                 </div>
 
                 <div className="space-y-4 pt-2">
-                  {/* Default model */}
-                  <div className="flex justify-between items-center py-2.5 border-b border-white/5">
-                    <span className="text-xs font-semibold text-white/80">{st.defaultLLM}</span>
-                    <select 
-                      value={defaultModel}
-                      onChange={(e) => setDefaultModel(e.target.value)}
-                      className="bg-[#111] border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-neural-cyan/30 cursor-pointer"
-                    >
-                      <option value="Gemini 2.5 Flash">Gemini 2.5 Flash ({language === "fa" ? "پیش‌فرض" : "Default"})</option>
-                      <option value="Gemini 2.5 Pro">Gemini 2.5 Pro ({language === "fa" ? "زمینه عمیق" : "Deep Context"})</option>
-                      <option value="Gemini 1.5 Pro">Gemini 1.5 Pro ({language === "fa" ? "استاندارد" : "Standard"})</option>
-                    </select>
-                  </div>
-
-                  {/* Reasoning mode */}
                   <div className="flex justify-between items-center py-2.5 border-b border-white/5">
                     <div className="max-w-[70%]">
-                      <span className="text-xs font-semibold text-white/80 block">{st.reasoningMode}</span>
-                      <span className="text-[10px] text-titanium/45">{st.reasoningModeSub}</span>
+                      <span className="text-xs font-semibold text-white/80 block">Continuous Reasoning Mode</span>
+                      <span className="text-[10px] text-titanium/45">Allows the model to think extensively before emitting results.</span>
                     </div>
                     <button
                       onClick={() => setReasoningMode(!reasoningMode)}
@@ -371,112 +333,144 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
                     </button>
                   </div>
 
-                  {/* Response style */}
                   <div className="flex justify-between items-center py-2.5 border-b border-white/5">
-                    <span className="text-xs font-semibold text-white/80">{st.responseStyle}</span>
+                    <span className="text-xs font-semibold text-white/80">Response Synthesis Style</span>
                     <select 
                       value={responseStyle}
                       onChange={(e) => setResponseStyle(e.target.value)}
                       className="bg-[#111] border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-neural-cyan/30 cursor-pointer"
                     >
-                      <option value="concise">{st.responseStyleConcise}</option>
-                      <option value="verbose">{st.responseStyleVerbose}</option>
-                      <option value="code-first">{st.responseStyleCode}</option>
+                      <option value="concise">Concise & Direct (Speed)</option>
+                      <option value="verbose">Comprehensive & Structured</option>
+                      <option value="code-first">Technical & Code-centric</option>
                     </select>
                   </div>
 
-                  {/* MIMO API Key input */}
-                  <div className="space-y-3 py-2.5 border-b border-white/5">
+                  {/* Providers Management Section */}
+                  <div className="space-y-4 py-3">
                     <div className="flex justify-between items-center">
-                      <div className="max-w-[70%]">
-                        <span className="text-xs font-semibold text-white/80 block">MiMo API Key</span>
-                        <span className="text-[10px] text-titanium/45">Your HuggingFace token (hf_...) or compatible API key</span>
+                      <div>
+                        <h4 className="text-xs font-bold text-white">{st.providersTitle}</h4>
+                        <p className="text-[10px] text-titanium/45">{st.providersSub}</p>
                       </div>
-                      <input
-                        value={mimoApiKey}
-                        onChange={(e) => setMimoApiKey(e.target.value)}
-                        placeholder="hf_..."
-                        className="bg-[#111] border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-neural-cyan/30 w-48"
-                      />
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <div className="max-w-[70%]">
-                        <span className="text-xs font-semibold text-white/80 block">API Base URL</span>
-                        <span className="text-[10px] text-titanium/45">OpenAI-compatible endpoint (HuggingFace, local vLLM, etc.)</span>
-                      </div>
-                      <input
-                        value={mimoBaseUrl}
-                        onChange={(e) => setMimoBaseUrl(e.target.value)}
-                        placeholder="https://api.siliconflow.cn/v1"
-                        className="bg-[#111] border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-neural-cyan/30 w-48"
-                      />
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <div className="max-w-[70%]">
-                        <span className="text-xs font-semibold text-white/80 block">Model ID</span>
-                        <span className="text-[10px] text-titanium/45">Model identifier for the inference endpoint</span>
-                      </div>
-                      <input
-                        value={mimoModel}
-                        onChange={(e) => setMimoModel(e.target.value)}
-                        placeholder="Qwen/Qwen3-8B"
-                        className="bg-[#111] border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-neural-cyan/30 w-48"
-                      />
-                    </div>
-                    <div className="flex justify-end">
                       <button
-                        onClick={async () => {
-                          setSaveError(null);
-                          setSavedOk(false);
-                          try {
-                            setSavingKey(true);
-                            localStorage.setItem('mimo_api_key', mimoApiKey);
-                            localStorage.setItem('mimo_base_url', mimoBaseUrl);
-                            localStorage.setItem('mimo_model', mimoModel);
-
-                            try {
-                              const { setApiKey } = await import('../api');
-                              await setApiKey(mimoApiKey, mimoBaseUrl, mimoModel);
-                              setSavedOk(true);
-                            } catch (err: any) {
-                              setSaveError(err?.message ?? 'Failed to persist to backend');
-                            }
-                          } finally {
-                            setSavingKey(false);
-                          }
-                        }}
-                        className="px-3 py-1.5 rounded-lg text-[10px] font-mono transition-all cursor-pointer bg-neural-cyan text-black"
+                        onClick={refreshCatalog}
+                        disabled={refreshing}
+                        className="flex items-center gap-1.5 px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[10px] font-mono text-neural-cyan transition-all cursor-pointer disabled:opacity-50"
                       >
-                        {savingKey ? 'Saving...' : savedOk ? 'Saved' : 'Save'}
+                        <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
+                        {st.refreshModelsBtn}
                       </button>
                     </div>
-                    {saveError && (
-                      <div className="text-[11px] text-rose-400">{saveError}</div>
-                    )}
-                  </div>
 
-                  {/* Configured Agents list */}
-                  <div className="py-2">
-                    <span className="text-xs font-semibold text-white/80 block mb-2">{st.activeAgents}</span>
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                      {[
-                        language === "fa" ? "عامل تحقیق" : "Research Agent",
-                        language === "fa" ? "عامل برنامه‌نویسی" : "Coding Agent",
-                        language === "fa" ? "عامل حافظه" : "Memory Agent",
-                        language === "fa" ? "عامل برنامه‌ریزی" : "Planning Agent",
-                        language === "fa" ? "عامل امنیتی" : "Security Agent"
-                      ].map(agent => (
-                        <span key={agent} className="px-2.5 py-1 bg-white/3 border border-white/5 rounded-lg text-[10px] font-mono text-center text-neural-cyan truncate">
-                          {agent}
-                        </span>
-                      ))}
-                    </div>
+                    {provLoading ? (
+                      <div className="text-xs text-titanium/50 py-4 text-center font-mono">Loading providers...</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {providers.map((p) => (
+                          <div key={p.id} className="p-3 bg-white/[0.01] border border-white/5 rounded-xl flex items-center justify-between gap-3">
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-white">{p.name}</span>
+                                <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded ${
+                                  p.hasCredential ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-white/5 text-titanium/40"
+                                }`}>
+                                  {p.hasCredential ? "Configured" : "No Key"}
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-titanium/40 font-mono">
+                                {p.modelCount} models available ({p.id})
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              {selectedProviderId === p.id ? (
+                                <div className="flex items-center gap-1.5">
+                                  <input
+                                    type="password"
+                                    autoComplete="off"
+                                    placeholder="API Key..."
+                                    value={credentialKey}
+                                    onChange={(e) => setCredentialKey(e.target.value)}
+                                    className="bg-[#111] border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:border-neural-cyan/30 w-36"
+                                  />
+                                  <button
+                                    onClick={async () => {
+                                      setActionError(null);
+                                      setActionSuccess(null);
+                                      try {
+                                        await addCredential(p.id, credentialKey);
+                                        setCredentialKey('');
+                                        setSelectedProviderId('');
+                                        setActionSuccess(`Credential saved for ${p.name}`);
+                                      } catch (err: any) {
+                                        setActionError(err?.message || 'Failed to save');
+                                      }
+                                    }}
+                                    className="px-2.5 py-1 bg-neural-cyan text-black rounded-lg text-[10px] font-mono font-bold cursor-pointer"
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    onClick={() => { setSelectedProviderId(''); setCredentialKey(''); }}
+                                    className="px-2 py-1 bg-white/5 text-titanium/60 rounded-lg text-[10px] font-mono cursor-pointer hover:text-white"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    onClick={() => { setSelectedProviderId(p.id); setCredentialKey(''); }}
+                                    className="flex items-center gap-1 px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[10px] font-mono text-white transition-all cursor-pointer"
+                                  >
+                                    <Key size={11} />
+                                    {st.addKey}
+                                  </button>
+                                  {p.hasCredential && (
+                                    <button
+                                      onClick={async () => {
+                                        if (confirm(`Revoke key for ${p.name}?`)) {
+                                          try {
+                                            await removeCredential(p.id);
+                                            setActionSuccess(`Key removed for ${p.name}`);
+                                          } catch (err: any) {
+                                            setActionError(err?.message || 'Failed to remove');
+                                          }
+                                        }
+                                      }}
+                                      className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg transition-all cursor-pointer"
+                                      title={st.removeKey}
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {(provError || actionError) && (
+                      <div className="p-2.5 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-300 flex items-center gap-2 font-mono">
+                        <AlertTriangle size={14} className="shrink-0" />
+                        {provError || actionError}
+                      </div>
+                    )}
+
+                    {actionSuccess && (
+                      <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-300 flex items-center gap-2 font-mono">
+                        <CheckCircle size={14} className="shrink-0" />
+                        {actionSuccess}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
             )}
 
-            {/* INSTALLED SKILLS TAB */}
             {activeTab === "skills" && (
               <div className="space-y-6">
                 <div>
@@ -515,7 +509,6 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
               </div>
             )}
 
-            {/* NOTIFICATIONS TAB */}
             {activeTab === "notifications" && (
               <div className="space-y-6">
                 <div>
@@ -524,7 +517,6 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
                 </div>
 
                 <div className="space-y-4 pt-2">
-                  {/* Desktop notifications */}
                   <div className="flex justify-between items-center py-2.5 border-b border-white/5">
                     <div className="max-w-[70%]">
                       <span className="text-xs font-semibold text-white/80 block">{st.desktopNotifs}</span>
@@ -542,7 +534,6 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
                     </button>
                   </div>
 
-                  {/* Email digests */}
                   <div className="flex justify-between items-center py-2.5">
                     <div className="max-w-[70%]">
                       <span className="text-xs font-semibold text-white/80 block">{st.emailDigests}</span>
@@ -563,7 +554,6 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
               </div>
             )}
 
-            {/* PRIVACY TAB */}
             {activeTab === "privacy" && (
               <div className="space-y-6">
                 <div>
@@ -572,7 +562,6 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
                 </div>
 
                 <div className="space-y-4 pt-2">
-                  {/* Retention choice */}
                   <div className="flex justify-between items-center py-2.5 border-b border-white/5">
                     <span className="text-xs font-semibold text-white/80">{st.dataRetention}</span>
                     <select 
@@ -586,7 +575,6 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
                     </select>
                   </div>
 
-                  {/* Memory control toggle */}
                   <div className="flex justify-between items-center py-2.5">
                     <div>
                       <span className="text-xs font-semibold text-white/80 block">{st.persistentMemory}</span>
@@ -600,7 +588,6 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
               </div>
             )}
 
-            {/* CONNECTED ACCOUNTS */}
             {activeTab === "connected" && (
               <div className="space-y-6">
                 <div>
@@ -621,7 +608,6 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
             )}
           </div>
 
-          {/* Footer Save Notice */}
           <div className="pt-4 border-t border-white/5 flex items-center justify-between text-[10px] font-mono text-titanium/30 mt-6">
             <span>{st.saveNotice}</span>
             <span className="flex items-center gap-1 text-neural-cyan">

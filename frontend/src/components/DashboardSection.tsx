@@ -19,6 +19,7 @@ import { translations } from "../utils/translations";
 import { OrbState } from "../types";
 import Orb from "./Orb";
 import { listProjects, type Project } from "../api";
+import ErrorBoundary from "./ErrorBoundary";
 
 interface DashboardSectionProps {
   language: "en" | "fa";
@@ -42,10 +43,14 @@ export default function DashboardSection({
   const t = translations[language];
   const [apiProjects, setApiProjects] = useState<Project[]>([]);
 
+  const [projectsError, setProjectsError] = useState<string | null>(null);
+
   useEffect(() => {
     listProjects()
       .then(setApiProjects)
-      .catch(() => {});
+      .catch((err: any) => {
+        setProjectsError(err?.message || 'Failed to load projects');
+      });
   }, []);
 
   // Filter recent personal chats
@@ -74,6 +79,14 @@ export default function DashboardSection({
 
   return (
     <div className="w-full max-w-7xl mx-auto px-4 py-6 md:px-8 select-none text-left relative overflow-hidden animate-fadeIn">
+      {/* Error banner */}
+      {projectsError && (
+        <div className="mb-4 px-4 py-2 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-400 font-mono flex items-center justify-between">
+          <span>{projectsError}</span>
+          <button onClick={() => setProjectsError(null)} className="text-red-400 hover:text-red-300 ml-2 cursor-pointer">&times;</button>
+        </div>
+      )}
+
       {/* Absolute Ambient Background Glows */}
       <div className="absolute top-10 left-1/2 -translate-x-1/2 w-[450px] h-[450px] bg-neural-cyan/4 rounded-full filter blur-[100px] pointer-events-none mix-blend-screen" />
       <div className="absolute top-40 left-1/3 w-[300px] h-[300px] bg-electric-blue/3 rounded-full filter blur-[80px] pointer-events-none mix-blend-screen" />
@@ -88,11 +101,13 @@ export default function DashboardSection({
           <div className="absolute w-[270px] h-[270px] rounded-full border border-dotted border-neural-cyan/10 animate-spin" style={{ animationDuration: "140s", animationDirection: "reverse" }} />
           
           <div className="relative flex items-center justify-center bg-black/20 rounded-full p-4 border border-white/5 shadow-[0_0_50px_rgba(93,247,255,0.03)] mb-4">
-            <Orb 
-              state={orbState} 
-              size={180} 
-              onClick={() => onNavigate("Chat")}
-            />
+            <ErrorBoundary fallback={<div className="w-[180px] h-[180px] flex items-center justify-center rounded-full bg-white/5 border border-white/10 text-xs text-titanium/60 font-mono">Orb offline</div>}>
+              <Orb
+                state={orbState}
+                size={180}
+                onClick={() => onNavigate("Chat")}
+              />
+            </ErrorBoundary>
           </div>
         </div>
 

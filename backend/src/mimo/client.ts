@@ -38,6 +38,7 @@ export const MimoProvidersResponseSchema = z.object({
       options: z.record(z.string(), z.unknown()).default({}),
       source: z.string(),
       models: z.record(z.string(), MimoModelSchema),
+      authMethods: z.array(z.string()).optional(),
     })
   ),
   default: z.record(z.string(), z.string()),

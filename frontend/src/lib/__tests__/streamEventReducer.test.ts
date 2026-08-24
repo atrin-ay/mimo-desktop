@@ -222,7 +222,7 @@ describe("reduceStreamEvent", () => {
     it("marks running events as error and sets orbState to Error", () => {
       const { acc, orbStates, globalActivityCount } = processSequence(fixtures.errorHandling.input);
 
-      expect(acc.agentText).toBe("");
+      expect(acc.agentText).toBe("⚠️ **Error:** Provider stream failed");
       expect(orbStates[orbStates.length - 1]).toBe("Error");
 
       // The running tool_use event should be marked as error

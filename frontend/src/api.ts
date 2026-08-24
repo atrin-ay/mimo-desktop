@@ -26,11 +26,27 @@ export interface ApiError {
   };
 }
 
-function getAdminHeaders(): Record<string, string> {
-  const token = (import.meta as any).env?.VITE_ADMIN_TOKEN || localStorage.getItem('admin_token') || '';
+let cachedAdminToken: string | null = null;
+
+async function getAdminHeaders(): Promise<Record<string, string>> {
+  const envToken = (import.meta as any).env?.VITE_ADMIN_TOKEN;
+  if (envToken) {
+    return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${envToken}` };
+  }
+  if (!cachedAdminToken) {
+    try {
+      const res = await fetch(`${API_BASE}/admin/token`);
+      if (res.ok) {
+        const json = await res.json();
+        cachedAdminToken = json?.data?.token || '';
+      }
+    } catch {
+      // ignore
+    }
+  }
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+  if (cachedAdminToken) {
+    headers['Authorization'] = `Bearer ${cachedAdminToken}`;
   }
   return headers;
 }
@@ -51,11 +67,11 @@ async function parseError(response: Response): Promise<string> {
   return text || `Request failed with status ${response.status}`;
 }
 
-export async function createSession(id?: string): Promise<ApiSession> {
+export async function createSession(id?: string, model?: string): Promise<ApiSession> {
   const res = await fetch(`${API_BASE}/session`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id }),
+    body: JSON.stringify({ id, model }),
   });
   if (!res.ok) {
     throw new Error(await parseError(res));
@@ -236,6 +252,7 @@ export interface ProviderSummary {
   hasCredential: boolean;
   source: string;
   modelCount: number;
+  authMethod?: 'api_key' | 'oauth' | 'unknown';
 }
 
 export interface ModelInfo {
@@ -256,7 +273,7 @@ export interface ModelInfo {
   cost?: {
     input?: number;
     output?: number;
-    cache?: number;
+    cache?: number | { read?: number; write?: number };
   };
 }
 
@@ -267,6 +284,7 @@ export interface ProviderWithModels {
   options: Record<string, unknown>;
   source: string;
   hasCredential: boolean;
+  authMethod?: 'api_key' | 'oauth' | 'unknown';
   models: ModelInfo[];
 }
 
@@ -288,7 +306,7 @@ export async function listProviders(): Promise<ProviderSummary[]> {
 export async function setProviderCredential(id: string, key: string): Promise<void> {
   const res = await fetch(`${API_BASE}/providers/${encodeURIComponent(id)}/credential`, {
     method: 'POST',
-    headers: getAdminHeaders(),
+    headers: await getAdminHeaders(),
     body: JSON.stringify({ key }),
   });
   if (!res.ok) {
@@ -299,7 +317,7 @@ export async function setProviderCredential(id: string, key: string): Promise<vo
 export async function removeProviderCredential(id: string): Promise<void> {
   const res = await fetch(`${API_BASE}/providers/${encodeURIComponent(id)}/credential`, {
     method: 'DELETE',
-    headers: getAdminHeaders(),
+    headers: await getAdminHeaders(),
   });
   if (!res.ok) {
     throw new Error(await parseError(res));
@@ -309,7 +327,7 @@ export async function removeProviderCredential(id: string): Promise<void> {
 export async function refreshModels(): Promise<void> {
   const res = await fetch(`${API_BASE}/models/refresh`, {
     method: 'POST',
-    headers: getAdminHeaders(),
+    headers: await getAdminHeaders(),
   });
   if (!res.ok) {
     throw new Error(await parseError(res));

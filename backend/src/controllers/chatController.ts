@@ -5,9 +5,29 @@ import { messageRepository } from '../storage/messageRepository';
 import { getProvider } from '../providers';
 import { getDatabase } from '../storage/database';
 import { contextManager } from '../context/ContextManager';
+import { modelService } from '../services/modelService';
 import { logger } from '../config/logger';
 import { env } from '../config/env';
 import type { ApiResponse, ChatResponse, Message, MiMoAgent, ProviderMessage } from '../types';
+
+export function sanitizeSystemReminders(text: string): string {
+  if (!text) return '';
+  let cleaned = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, '');
+  cleaned = cleaned.replace(/<system-prompt>[\s\S]*?<\/system-prompt>/gi, '');
+  cleaned = cleaned.replace(/<available_skills>[\s\S]*?<\/available_skills>/gi, '');
+  cleaned = cleaned.replace(/Skills available in this session:[\s\S]*?(?=\n\n|$)/gi, '');
+  cleaned = cleaned.replace(/^[\s\S]*?<\/system-reminder>/gi, '');
+  return cleaned;
+}
+
+export function sanitizeErrorMessage(msg: string): string {
+  if (!msg) return 'An error occurred';
+  return String(msg)
+    .replace(/sk-[a-zA-Z0-9_-]{10,}/g, 'sk-[REDACTED]')
+    .replace(/Bearer\s+[a-zA-Z0-9._-]+/gi, 'Bearer [REDACTED]')
+    .replace(/api[_-]?key[=:]\s*[a-zA-Z0-9._-]+/gi, 'apiKey=[REDACTED]')
+    .replace(/password[=:]\s*[^\s]+/gi, 'password=[REDACTED]');
+}
 
 /** POST /api/chat — send a message in a session and receive an assistant reply. */
 export async function sendMessage(
@@ -46,6 +66,9 @@ export async function streamMessage(
 
     // Ensure session is assigned to a project (auto-assign if needed)
     const projectId = contextManager.ensureProjectForSession(sessionId);
+
+    // Resolve chat-scoped model
+    const targetModel = await modelService.resolveModelForSession(sessionId, model);
 
     // Build context injection from brain (if available)
     const contextInjection = contextManager.buildInjection(projectId);
@@ -99,6 +122,10 @@ export async function streamMessage(
             logger.info({ questionID: event.properties?.id, sessionID: event.sessionID }, 'Question asked by MiMo');
           }
 
+          if (event?.type === 'system' || event?.type === 'developer' || event?.role === 'system' || event?.role === 'developer') {
+            return;
+          }
+
           // Accumulate the assistant reply as it streams so we can persist it
           // once the stream ends — mirroring how the frontend builds the
           // visible message (text parts, plus any raw passthrough output).
@@ -108,6 +135,8 @@ export async function streamMessage(
           // Strip the echoed prefix so it doesn't appear in the UI or DB.
           if (event?.type === 'text' && event.part?.text) {
             let text = event.part.text;
+            text = sanitizeSystemReminders(text);
+            if (!text) return;
             if (text.startsWith(userContent)) {
               text = text.slice(userContent.length).replace(/^\n+/, '');
               if (text) event = { ...event, part: { ...event.part, text } };
@@ -116,6 +145,8 @@ export async function streamMessage(
             assistantText += text;
           } else if (event?.type === 'raw' && typeof event.text === 'string') {
             let text = event.text;
+            text = sanitizeSystemReminders(text);
+            if (!text) return;
             if (text.startsWith(userContent)) {
               text = text.slice(userContent.length).replace(/^\n+/, '');
               if (text) event = { ...event, text };
@@ -124,7 +155,7 @@ export async function streamMessage(
             assistantText += text;
           }
           res.write(`data: ${JSON.stringify(event)}\n\n`);
-        }, model);
+        }, targetModel);
 
         // Persist the assistant reply so it survives a page reload. Without
         // this, only user messages were stored and history looked one-sided.
@@ -141,12 +172,12 @@ export async function streamMessage(
           res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMsg.id, timestamp: Date.now() })}\n\n`);
         }
       } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
+        const errorMsg = sanitizeErrorMessage(err instanceof Error ? err.message : String(err));
         logger.error({ err, sessionId }, 'Streaming provider error');
         if (res.headersSent) {
-          res.write(`data: ${JSON.stringify({ type: 'fatal_error', code: 'PROVIDER_ERROR', message: 'Provider stream failed', timestamp: Date.now() })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: 'fatal_error', code: 'PROVIDER_ERROR', message: errorMsg, timestamp: Date.now() })}\n\n`);
         } else {
-          res.status(502).json({ error: { code: 'PROVIDER_ERROR', message: 'AI provider failed to generate a response' } });
+          res.status(502).json({ error: { code: 'PROVIDER_ERROR', message: errorMsg } });
         }
       }
     } else {
@@ -154,7 +185,7 @@ export async function streamMessage(
       res.write(`data: ${JSON.stringify({ type: 'state', state: 'thinking', label: 'Analyzing...', timestamp: Date.now() })}\n\n`);
 
       try {
-        const result = await provider.sendMessage(sessionId, requestHistory, agent, model);
+        const result = await provider.sendMessage(sessionId, requestHistory, agent, targetModel);
 
         // Emit text event
         res.write(`data: ${JSON.stringify({ type: 'text', text: result.content, timestamp: Date.now() })}\n\n`);
@@ -171,12 +202,12 @@ export async function streamMessage(
         // Emit completion
         res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMsg.id, timestamp: Date.now() })}\n\n`);
       } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
+        const errorMsg = sanitizeErrorMessage(err instanceof Error ? err.message : String(err));
         logger.error({ err, sessionId }, 'Provider error');
         if (res.headersSent) {
-          res.write(`data: ${JSON.stringify({ type: 'fatal_error', code: 'PROVIDER_ERROR', message: 'Provider stream failed', timestamp: Date.now() })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: 'fatal_error', code: 'PROVIDER_ERROR', message: errorMsg, timestamp: Date.now() })}\n\n`);
         } else {
-          res.status(502).json({ error: { code: 'PROVIDER_ERROR', message: 'AI provider failed to generate a response' } });
+          res.status(502).json({ error: { code: 'PROVIDER_ERROR', message: errorMsg } });
         }
       }
     }

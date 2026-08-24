@@ -4,14 +4,15 @@ import { getProvider } from '../providers';
 import type { ApiResponse, Session, SessionWithMessages } from '../types';
 
 /** POST /api/session — create a new session. */
-export function createSession(
+export async function createSession(
   req: Request,
   res: Response,
   next: NextFunction,
-): void {
+): Promise<void> {
   try {
     const id = req.body?.id as string | undefined;
-    const session = sessionService.createSession(id);
+    const model = req.body?.model as string | undefined;
+    const session = await sessionService.createSession(id, model);
     const body: ApiResponse<Session> = { data: session };
     res.status(201).json(body);
   } catch (err) {

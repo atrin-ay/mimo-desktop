@@ -3,7 +3,7 @@ import { motion } from "motion/react";
 import { Send, Mic, Terminal, Square } from "lucide-react";
 import { OrbState, AgentName } from "../types";
 import { translations } from "../utils/translations";
-import { ModelInfo } from "../api";
+import { ModelInfo, ProviderWithModels } from "../api";
 
 interface ChatInputProps {
   onSubmit: (prompt: string) => void;
@@ -15,6 +15,7 @@ interface ChatInputProps {
   model: string;
   setModel: (model: string) => void;
   models: ModelInfo[];
+  providers?: ProviderWithModels[];
   modelsLoading: boolean;
   onStop: () => void;
   language: "en" | "fa";
@@ -48,6 +49,7 @@ export default function ChatInput({
   model,
   setModel,
   models,
+  providers,
   modelsLoading,
   onStop,
   language,
@@ -56,6 +58,18 @@ export default function ChatInput({
   const [isListening, setIsListening] = useState(false);
   const [placeholderIdx, setPlaceholderIdx] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const currentProviderId = model.includes('/') ? model.split('/')[0] : (providers?.[0]?.id || '');
+  const [selectedProviderId, setSelectedProviderId] = useState<string>(currentProviderId);
+
+  useEffect(() => {
+    if (model.includes('/')) {
+      const pId = model.split('/')[0];
+      if (pId && pId !== selectedProviderId) {
+        setSelectedProviderId(pId);
+      }
+    }
+  }, [model]);
 
   useEffect(() => {
     if (prompt) return;
@@ -113,6 +127,31 @@ export default function ChatInput({
 
         <div className="w-px h-3 bg-titanium/20" />
 
+        {providers && providers.length > 0 && (
+          <>
+            <select
+              value={selectedProviderId}
+              onChange={(e) => {
+                const provId = e.target.value;
+                setSelectedProviderId(provId);
+                const provModels = models.filter(m => m.providerID === provId);
+                if (provModels.length > 0) {
+                  setModel(provModels[0].id);
+                }
+              }}
+              className="bg-transparent border-none text-[10px] font-mono text-titanium/50 uppercase tracking-wider cursor-pointer focus:outline-none hover:text-titanium/70 transition-colors"
+            >
+              {providers.map((p) => (
+                <option key={p.id} value={p.id} className="bg-[#111] text-white">
+                  {p.name}
+                </option>
+              ))}
+            </select>
+
+            <div className="w-px h-3 bg-titanium/20" />
+          </>
+        )}
+
         <select
           value={model}
           onChange={(e) => setModel(e.target.value)}
@@ -122,11 +161,13 @@ export default function ChatInput({
           {modelsLoading ? (
             <option className="bg-[#111] text-white">Loading...</option>
           ) : (
-            models.map((m) => (
-              <option key={m.id} value={m.id} className="bg-[#111] text-white">
-                {m.name}
-              </option>
-            ))
+            models
+              .filter(m => !selectedProviderId || m.providerID === selectedProviderId)
+              .map((m) => (
+                <option key={m.id} value={m.id} className="bg-[#111] text-white">
+                  {m.name}
+                </option>
+              ))
           )}
         </select>
       </div>

@@ -5,6 +5,7 @@ import type { Session } from '../types';
 interface SessionRow {
   id: string;
   createdAt: string;
+  model?: string | null;
 }
 
 /** A session enriched with metadata for the sidebar list. */
@@ -30,6 +31,7 @@ function mapRow(row: SessionRow): Session {
   return {
     id: row.id,
     createdAt: row.createdAt,
+    model: row.model ?? null,
   };
 }
 
@@ -38,18 +40,25 @@ function mapRow(row: SessionRow): Session {
  */
 export const sessionRepository = {
   /** Create a new session. Returns the created session. */
-  create(id?: string): Session {
+  create(id?: string, model?: string): Session {
     const db = getDatabase();
     const session: Session = {
       id: id ?? uuidv4(),
       createdAt: new Date().toISOString(),
+      model: model ?? null,
     };
 
     db.prepare(
-      'INSERT INTO sessions (id, createdAt) VALUES (?, ?)',
-    ).run(session.id, session.createdAt);
+      'INSERT INTO sessions (id, createdAt, model) VALUES (?, ?, ?)',
+    ).run(session.id, session.createdAt, session.model);
 
     return session;
+  },
+
+  /** Update session model. */
+  updateModel(id: string, model: string): void {
+    const db = getDatabase();
+    db.prepare('UPDATE sessions SET model = ? WHERE id = ?').run(model, id);
   },
 
   /**
@@ -91,7 +100,7 @@ export const sessionRepository = {
   findById(id: string): Session | null {
     const db = getDatabase();
     const row = db
-      .prepare('SELECT id, createdAt FROM sessions WHERE id = ?')
+      .prepare('SELECT id, createdAt, model FROM sessions WHERE id = ?')
       .get(id) as SessionRow | undefined;
 
     return row ? mapRow(row) : null;

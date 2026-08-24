@@ -11,6 +11,14 @@ export interface UseProvidersReturn {
   refreshCatalog: () => Promise<void>;
 }
 
+function formatError(err: any): string {
+  const msg = err?.message || '';
+  if (/provider_not_ready|not ready|starting|503/i.test(msg)) {
+    return 'MiMo Code is still starting up — retry in a moment';
+  }
+  return msg || 'An error occurred';
+}
+
 export default function useProviders(): UseProvidersReturn {
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,7 +32,7 @@ export default function useProviders(): UseProvidersReturn {
       const list = await listProviders();
       setProviders(list);
     } catch (err: any) {
-      setError(err?.message || 'Failed to load providers');
+      setError(formatError(err));
     } finally {
       setLoading(false);
     }
@@ -40,7 +48,7 @@ export default function useProviders(): UseProvidersReturn {
       await setProviderCredential(id, key);
       await loadProviders();
     } catch (err: any) {
-      setError(err?.message || 'Failed to save credential');
+      setError(formatError(err));
       throw err;
     }
   }, [loadProviders]);
@@ -51,7 +59,7 @@ export default function useProviders(): UseProvidersReturn {
       await removeProviderCredential(id);
       await loadProviders();
     } catch (err: any) {
-      setError(err?.message || 'Failed to remove credential');
+      setError(formatError(err));
       throw err;
     }
   }, [loadProviders]);
@@ -63,7 +71,7 @@ export default function useProviders(): UseProvidersReturn {
       await refreshModels();
       await loadProviders();
     } catch (err: any) {
-      setError(err?.message || 'Failed to refresh models');
+      setError(formatError(err));
     } finally {
       setRefreshing(false);
     }

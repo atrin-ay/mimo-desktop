@@ -54,6 +54,25 @@ function debugLog(category: string, data: Record<string, unknown>) {
   logger.debug(data, `[MiMo Debug] ${category}`);
 }
 
+function sanitizeSystemReminders(text: string): string {
+  if (!text) return '';
+  let cleaned = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, '');
+  cleaned = cleaned.replace(/<system-prompt>[\s\S]*?<\/system-prompt>/gi, '');
+  cleaned = cleaned.replace(/<available_skills>[\s\S]*?<\/available_skills>/gi, '');
+  cleaned = cleaned.replace(/Skills available in this session:[\s\S]*?(?=\n\n|$)/gi, '');
+  cleaned = cleaned.replace(/^[\s\S]*?<\/system-reminder>/gi, '');
+  return cleaned;
+}
+
+function sanitizeErrorMessage(msg: string): string {
+  if (!msg) return 'An error occurred';
+  return String(msg)
+    .replace(/sk-[a-zA-Z0-9_-]{10,}/g, 'sk-[REDACTED]')
+    .replace(/Bearer\s+[a-zA-Z0-9._-]+/gi, 'Bearer [REDACTED]')
+    .replace(/api[_-]?key[=:]\s*[a-zA-Z0-9._-]+/gi, 'apiKey=[REDACTED]')
+    .replace(/password[=:]\s*[^\s]+/gi, 'password=[REDACTED]');
+}
+
 // ─── Provider implementation ─────────────────────────────────────────────────
 
 /**
@@ -126,6 +145,24 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
     this.expectedPort = port;
     this.servePassword = env.mimoServerPassword || generateServePassword();
 
+    // Pre-warm models catalog on disk FIRST before spawning serve, so serve loads the full catalog
+    try {
+      logger.info({ binary: this.binary }, 'Pre-warming models catalog before launching mimo serve');
+      await new Promise<void>((resolve) => {
+        const proc = spawn(this.binary, ['models', '--refresh'], {
+          cwd: paths.repoRoot,
+          shell: false,
+          env: buildChildEnv(),
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+        });
+        proc.on('close', () => resolve());
+        proc.on('error', () => resolve());
+      });
+    } catch (err: any) {
+      logger.warn({ error: err.message }, 'Pre-warm models catalog failed (non-fatal)');
+    }
+
     const args = ['serve', '--port', String(port), '--hostname', '127.0.0.1'];
 
     logger.info({ binary: this.binary, args, runtimeRoot: paths.runtimeRoot }, 'Starting isolated mimo serve');
@@ -183,6 +220,19 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  /**
+   * Restart the mimo serve process to reload fresh auth and catalog.
+   */
+  async restart(): Promise<void> {
+    logger.info('Restarting mimo serve to reload fresh auth and catalog');
+    await this.stop();
+    this.readyPromise = new Promise((resolve, reject) => {
+      this.readyResolve = resolve;
+      this.readyReject = reject;
+    });
+    await this.start();
   }
 
   /**
@@ -356,6 +406,7 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
 
   private handleSSEEvent(event: any): void {
     const sessionID = this.eventSessionId(event);
+    logger.info({ type: event.type, sessionID, properties: event.properties }, 'SSE event received from MiMo serve');
     debugLog('sse_event', { type: event.type, sessionID });
 
     this.emit('event', event);
@@ -368,12 +419,53 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
         tool: event.properties?.tool,
       };
       this.emit('question', question);
+      logger.info({ questionID: question.id, sessionID: question.sessionID, tool: question.tool, questions: question.questions }, 'Question / permission requested by MiMo serve');
       debugLog('question_asked', { id: question.id, sessionID: question.sessionID });
     }
   }
 
   private translateEvent(event: any): any | null {
+    if (!event || event.type === 'system' || event.type === 'developer' || event.role === 'system' || event.role === 'developer') {
+      return null;
+    }
     const sessionID = this.eventSessionId(event);
+    const eventType = String(event.type || '').toLowerCase();
+
+    logger.info({ type: event.type, sessionID, properties: event.properties }, 'Translating SSE event');
+
+    // Catch any permission, approval, question, prompt, or confirm events
+    if (
+      eventType.includes('question') ||
+      eventType.includes('permission') ||
+      eventType.includes('approval') ||
+      eventType.includes('prompt') ||
+      eventType.includes('confirm') ||
+      eventType.includes('wait')
+    ) {
+      logger.info({ event }, 'Detected permission/question/approval event from mimo serve');
+      const props = event.properties || event;
+      return {
+        type: 'question.asked',
+        properties: {
+          id: props.id || props.requestID || `q_${Date.now()}`,
+          sessionID: props.sessionID || sessionID,
+          questions: props.questions || [{
+            question: props.message || props.description || `Do you want to allow this action?`,
+            header: props.header || 'Permission Required',
+            options: props.options || [{ label: "Allow", description: "Allow action" }, { label: "Deny", description: "Deny action" }],
+          }],
+          tool: props.tool,
+        },
+        sessionID,
+      };
+    }
+
+    if (eventType.includes('error') || eventType.includes('fail') || eventType.includes('deny')) {
+      const err = event.properties?.error || event.message || event.error;
+      const message = typeof err === 'string' ? err : (err?.message || JSON.stringify(event));
+      logger.error({ message }, 'Detected error event from mimo serve');
+      return { type: 'error', message: sanitizeErrorMessage(message), sessionID };
+    }
 
     switch (event.type) {
       case 'message.part.updated': {
@@ -382,12 +474,35 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
         const delta = event.properties?.delta;
 
         switch (part.type) {
-          case 'text':
-            return { type: 'text', part: { text: delta ?? part.text ?? '' }, sessionID };
+          case 'text': {
+            const rawText = delta ?? part.text ?? '';
+            const cleaned = sanitizeSystemReminders(rawText);
+            if (!cleaned) return null;
+            return { type: 'text', part: { text: cleaned }, sessionID };
+          }
           case 'reasoning':
             return { type: 'reasoning', part: { text: delta ?? part.text ?? '' }, sessionID };
-          case 'tool':
+          case 'tool': {
+            const state = part.state;
+            logger.info({ tool: part.tool, state, callID: part.callID }, 'Tool part updated state');
+            if (state?.status === 'waiting' || state?.status === 'pending' || state?.status === 'approval' || state?.status === 'permission') {
+              return {
+                type: 'question.asked',
+                properties: {
+                  id: part.callID || `tool_q_${Date.now()}`,
+                  sessionID,
+                  questions: [{
+                    question: `Do you want to allow tool "${part.tool}" to execute?`,
+                    header: `Permission Required: ${part.tool}`,
+                    options: [{ label: "Allow", description: "Allow execution" }, { label: "Deny", description: "Deny execution" }],
+                  }],
+                  tool: { callID: part.callID },
+                },
+                sessionID,
+              };
+            }
             return { type: 'tool_use', part: { tool: part.tool, state: part.state, callID: part.callID }, sessionID };
+          }
           case 'step-start':
             return { type: 'step_start', sessionID };
           case 'step-finish':
@@ -401,7 +516,9 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
         const err = event.properties?.error;
         const message =
           (err && (err.data?.message || err.name || err.type)) || 'MiMo session error';
-        return { type: 'error', message, sessionID };
+        const cleanMsg = sanitizeErrorMessage(typeof message === 'string' ? message : JSON.stringify(message));
+        logger.error({ sessionID, cleanMsg }, 'Session error event');
+        return { type: 'fatal_error', message: cleanMsg, sessionID };
       }
 
       case 'session.idle':
@@ -411,6 +528,7 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
         return event;
 
       default:
+        logger.debug({ type: event.type }, 'Unhandled SSE event type dropped');
         return null;
     }
   }
@@ -622,7 +740,7 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
         });
       }
 
-      await this.waitForCompletion(sessionID, onEvent);
+      await this.waitForCompletion(sessionID, onEvent, pendingQuestions);
     } finally {
       this.removeListener('event', eventHandler);
       this.removeListener('question_reply', replyHandler);
@@ -633,35 +751,103 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
   private async waitForCompletion(
     sessionID: string,
     onEvent: (event: any) => void,
+    pendingQuestions: Map<string, { resolve: () => void }>,
   ): Promise<void> {
+    const startTime = Date.now();
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.removeListener('event', handler);
-        reject(new Error('MiMo stream timeout'));
-      }, 300000);
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+
+      const resetTimeout = (duration = 300000) => {
+        if (timeout) clearTimeout(timeout);
+        // If there are pending questions/permission requests, extend timeout to 15 minutes for user interaction
+        const ms = pendingQuestions.size > 0 ? 900000 : duration;
+        timeout = setTimeout(() => {
+          this.removeListener('event', handler);
+          this.removeListener('question_reply', replyHandler);
+          const err = new Error(`MiMo stream timeout (sessionID: ${sessionID}, elapsed: ${Date.now() - startTime}ms, pendingQuestions: ${pendingQuestions.size})`);
+          logger.error({ sessionID, elapsed: Date.now() - startTime, pendingCount: pendingQuestions.size }, 'MiMo stream timeout occurred');
+          reject(err);
+        }, ms);
+      };
+
+      resetTimeout();
+
+      const replyHandler = () => {
+        resetTimeout();
+      };
+      this.on('question_reply', replyHandler);
 
       const handler = (event: any) => {
         if (this.eventSessionId(event) !== sessionID) return;
 
+        if (event.type === 'question.asked') {
+          resetTimeout();
+        }
+
         if (event.type === 'session.idle') {
-          clearTimeout(timeout);
+          if (timeout) clearTimeout(timeout);
           this.removeListener('event', handler);
+          this.removeListener('question_reply', replyHandler);
+          logger.info({ sessionID, duration: Date.now() - startTime }, 'MiMo stream completed with session.idle');
           resolve();
           return;
         }
 
         if (event.type === 'session.error') {
-          clearTimeout(timeout);
+          if (timeout) clearTimeout(timeout);
           this.removeListener('event', handler);
+          this.removeListener('question_reply', replyHandler);
           const err = event.properties?.error;
           const message =
             (err && (err.data?.message || err.name || err.type)) || 'MiMo session error';
+          logger.error({ sessionID, message, err }, 'MiMo session error received');
           reject(new Error(message));
           return;
         }
       };
 
       this.on('event', handler);
+    });
+  }
+
+  async runCommand(args: string[]): Promise<{ stdout: string; stderr: string; code: number | null }> {
+    const allowedCommands = new Set(['models', 'providers', 'version']);
+    const primaryCmd = args[0]?.toLowerCase();
+    if (!primaryCmd || !allowedCommands.has(primaryCmd)) {
+      throw new Error(`Forbidden command in MimoServeProvider.runCommand: "${primaryCmd}"`);
+    }
+
+    const allowedFlags = new Set(['--refresh', '--verbose', '--json', '-v']);
+    for (let i = 1; i < args.length; i++) {
+      const arg = args[i];
+      if (arg.startsWith('-') && !allowedFlags.has(arg)) {
+        throw new Error(`Forbidden flag in MimoServeProvider.runCommand: "${arg}"`);
+      }
+    }
+
+    return new Promise((resolve, reject) => {
+      const paths = getRuntimePaths();
+      const proc = spawn(this.binary, args, {
+        cwd: paths.repoRoot,
+        shell: false,
+        env: buildChildEnv(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+
+      let stdout = '';
+      let stderr = '';
+
+      proc.stdout?.on('data', (data: Buffer) => { stdout += data.toString('utf-8'); });
+      proc.stderr?.on('data', (data: Buffer) => { stderr += data.toString('utf-8'); });
+
+      proc.on('close', (code) => {
+        resolve({ stdout, stderr, code });
+      });
+
+      proc.on('error', (err) => {
+        reject(err);
+      });
     });
   }
 
@@ -709,8 +895,10 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
   }
 
   async replyToQuestion(requestID: string, answers: string[][]): Promise<void> {
+    logger.info({ requestID, answers }, 'MimoServeProvider forwarding reply to question endpoint');
     debugLog('reply_question', { requestID, answers });
-    await this.httpRequest('POST', `/question/${requestID}/reply`, { answers });
+    const res = await this.httpRequest('POST', `/question/${requestID}/reply`, { answers });
+    logger.info({ requestID, status: res.status, data: res.data }, 'MimoServeProvider received reply response from MiMo serve');
     this.emit('question_reply', { requestID, answers });
   }
 

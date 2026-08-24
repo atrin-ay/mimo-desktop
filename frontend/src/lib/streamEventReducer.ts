@@ -84,12 +84,26 @@ export interface StreamEventResult {
   questionMessage?: Message;
 }
 
+export function sanitizeSystemReminders(text: string): string {
+  if (!text) return '';
+  let cleaned = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, '');
+  cleaned = cleaned.replace(/<system-prompt>[\s\S]*?<\/system-prompt>/gi, '');
+  cleaned = cleaned.replace(/<available_skills>[\s\S]*?<\/available_skills>/gi, '');
+  cleaned = cleaned.replace(/Skills available in this session:[\s\S]*?(?=\n\n|$)/gi, '');
+  cleaned = cleaned.replace(/^[\s\S]*?<\/system-reminder>/gi, '');
+  return cleaned;
+}
+
 // ─── Reducer ────────────────────────────────────────────────────────────────
 
 export function reduceStreamEvent(
   event: StreamEvent,
   acc: StreamAccumulator,
 ): StreamEventResult {
+  if (!event || event.type === 'system' || event.type === 'developer' || event.role === 'system' || event.role === 'developer') {
+    return { accumulator: acc };
+  }
+
   // Clone accumulator to avoid mutation
   const newAcc: StreamAccumulator = {
     ...acc,
@@ -125,7 +139,10 @@ export function reduceStreamEvent(
 
     case "text": {
       if (event.part?.text) {
-        newAcc.agentText += event.part.text;
+        let text = event.part.text;
+        text = sanitizeSystemReminders(text);
+        if (!text) break;
+        newAcc.agentText += text;
 
         // Mark any running events as completed
         newAcc.perMessageEvents.forEach((e) => {
@@ -369,17 +386,24 @@ export function reduceStreamEvent(
       break;
     }
 
+    case "fatal_error":
     case "error": {
-      const errMsg = event.message || "Error";
+      const errMsg = event.message || event.error?.message || "Error";
       newAcc.perMessageEvents.forEach((e) => {
         if (e.status === "running") {
           e.status = "error";
           e.detail = errMsg;
         }
       });
+      newAcc.agentText = newAcc.agentText ? `${newAcc.agentText}\n\n⚠️ **Error:** ${errMsg}` : `⚠️ **Error:** ${errMsg}`;
       result.globalActivitiesToError = true;
       result.globalErrorMessage = errMsg;
       result.orbStateToSet = OrbState.Error;
+      result.messageUpdate = {
+        text: newAcc.agentText,
+        events: [...newAcc.perMessageEvents],
+        status: "error",
+      };
       break;
     }
 
@@ -410,21 +434,28 @@ export function reduceStreamEvent(
       break;
     }
 
+    case "question.asked":
     case "question": {
       const questionText = event.part?.text || event.text || event.message || event.properties?.questions?.[0]?.question || "";
-      const questionOptions = event.part?.options || (event as any).options || [];
+      const questionOptions = event.part?.options || (event as any).options || event.properties?.questions?.[0]?.options || [];
       const requestID = event.properties?.id || event.id || event.requestID;
 
       // Format options as strings if they are objects
-      const formattedOptions = Array.isArray(questionOptions)
+      let formattedOptions = Array.isArray(questionOptions)
         ? questionOptions.map((opt: any) =>
             typeof opt === "string" ? opt : (opt.label || opt.name || String(opt))
           )
         : [];
 
-      // Only create a question message if there are structured options (2+)
-      if (formattedOptions.length >= 2 && questionText) {
-        const questionHeader = event.properties?.questions?.[0]?.header || "";
+      const isToolPermission = Boolean(event.properties?.tool || /allow|permission|approve|confirm|write|edit|run/i.test(questionText));
+
+      if (formattedOptions.length < 2 && isToolPermission) {
+        formattedOptions = formattedOptions.length === 1 ? [formattedOptions[0], "Deny"] : ["Allow", "Deny"];
+      }
+
+      // Only create a question message if there are structured options (2+) or it's a tool permission prompt
+      if ((formattedOptions.length >= 2 || isToolPermission) && questionText && requestID) {
+        const questionHeader = event.properties?.questions?.[0]?.header || (isToolPermission ? "Permission Required" : "");
         const questionMultiple = event.properties?.questions?.[0]?.multiple || false;
         const questionCustom = event.properties?.questions?.[0]?.custom !== false;
 
@@ -451,7 +482,10 @@ export function reduceStreamEvent(
 
     case "raw": {
       if (event.text) {
-        newAcc.agentText += event.text;
+        let text = event.text;
+        text = sanitizeSystemReminders(text);
+        if (!text) break;
+        newAcc.agentText += text;
         result.messageUpdate = { text: newAcc.agentText };
       }
       break;

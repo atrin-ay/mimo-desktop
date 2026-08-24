@@ -1,6 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { logger } from '../config/logger';
+import { Request, Response } from 'express';
+import { getAdminTokenValue } from '../middleware/adminAuth';
 
 // Check admin-overrides.json at boot for legacy MIMO_API_KEY
 const OVERRIDES_FILE = path.resolve(process.cwd(), 'data', 'admin-overrides.json');
@@ -15,3 +17,15 @@ try {
     }
   }
 } catch {}
+
+export const adminController = {
+  getToken(req: Request, res: Response): void {
+    const ip = req.ip || req.socket.remoteAddress || '';
+    const isLocal = ip.includes('127.0.0.1') || ip.includes('localhost') || ip.includes('::1') || ip.includes('::ffff:127.0.0.1');
+    if (!isLocal) {
+      res.status(403).json({ error: { code: 'forbidden', message: 'Local loopback only' } });
+      return;
+    }
+    res.json({ data: { token: getAdminTokenValue() } });
+  },
+};

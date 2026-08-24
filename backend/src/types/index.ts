@@ -18,6 +18,7 @@ export interface Message {
 export interface Session {
   id: string;
   createdAt: string; // ISO 8601 timestamp
+  model?: string | null;
 }
 
 /** A message as required by an AI provider (no DB metadata). */

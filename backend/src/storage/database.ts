@@ -89,12 +89,18 @@ export function initSchema(): void {
     );
   `);
 
-  // Guarded ALTER: add projectId to sessions if missing (for existing databases)
+  // Guarded ALTER: add projectId and model to sessions if missing (for existing databases)
   const sessionsInfo = db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[];
   const hasProjectId = sessionsInfo.some(col => col.name === 'projectId');
   if (!hasProjectId) {
     db.exec("ALTER TABLE sessions ADD COLUMN projectId TEXT");
     logger.info('Added projectId column to sessions table');
+  }
+
+  const hasModel = sessionsInfo.some(col => col.name === 'model');
+  if (!hasModel) {
+    db.exec("ALTER TABLE sessions ADD COLUMN model TEXT");
+    logger.info('Added model column to sessions table');
   }
 
   // Create indexes after ensuring all columns exist

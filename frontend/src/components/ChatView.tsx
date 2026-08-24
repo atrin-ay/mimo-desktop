@@ -2,7 +2,7 @@ import { useRef, useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { Terminal } from "lucide-react";
 import { OrbState, AgentName, Message } from "../types";
-import { ModelInfo } from "../api";
+import { ModelInfo, ProviderWithModels } from "../api";
 import { translations } from "../utils/translations";
 import Orb from "./Orb";
 import ErrorBoundary from "./ErrorBoundary";
@@ -19,6 +19,7 @@ interface ChatViewProps {
   model: string;
   setModel: (model: string) => void;
   models: ModelInfo[];
+  providers: ProviderWithModels[];
   modelsLoading: boolean;
   onExecute: (cmd: string) => void;
   onAnswer: (answer: string) => void;
@@ -36,6 +37,7 @@ export default function ChatView({
   model,
   setModel,
   models,
+  providers,
   modelsLoading,
   onExecute,
   onAnswer,
@@ -147,6 +149,7 @@ export default function ChatView({
           model={model}
           setModel={setModel}
           models={models}
+          providers={providers}
           modelsLoading={modelsLoading}
           onStop={onStop}
           language={language}

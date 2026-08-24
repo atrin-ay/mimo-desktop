@@ -393,6 +393,7 @@ export default function App() {
                         model={chat.model}
                         setModel={chat.setModel}
                         models={chat.models}
+                        providers={chat.providers}
                         modelsLoading={chat.modelsLoading}
                         onExecute={chat.handleExecuteCommand}
                         onAnswer={chat.handleAnswer}
@@ -413,6 +414,11 @@ export default function App() {
                     setLanguage={setLanguage}
                     agent={chat.agent}
                     setAgent={chat.setAgent}
+                    model={chat.model}
+                    setModel={chat.setModel}
+                    models={chat.models}
+                    providers={chat.providers}
+                    modelsLoading={chat.modelsLoading}
                   />
                 );
               })()}

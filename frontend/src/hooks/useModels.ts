@@ -5,6 +5,7 @@ import {
   setCurrentModel,
   ModelCatalog,
   ProviderWithModels,
+  ModelInfo,
 } from '../api';
 
 export interface UseModelsReturn {
@@ -12,9 +13,18 @@ export interface UseModelsReturn {
   setModel: (model: string) => Promise<void>;
   catalog: ModelCatalog | null;
   providers: ProviderWithModels[];
+  models: ModelInfo[];
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
+}
+
+function formatError(err: any): string {
+  const msg = err?.message || '';
+  if (/provider_not_ready|not ready|starting|503/i.test(msg)) {
+    return 'MiMo Code is still starting up — retry in a moment';
+  }
+  return msg || 'An error occurred';
 }
 
 export default function useModels(): UseModelsReturn {
@@ -32,9 +42,10 @@ export default function useModels(): UseModelsReturn {
         getCurrentModel(),
       ]);
       setCatalog(cat);
-      setModelState(currentModelId);
+      const defaultModel = currentModelId || cat?.providers?.[0]?.models?.[0]?.id || '';
+      setModelState(defaultModel);
     } catch (err: any) {
-      setError(err?.message || 'Failed to load models catalog');
+      setError(formatError(err));
       setCatalog(null);
     } finally {
       setLoading(false);
@@ -63,6 +74,7 @@ export default function useModels(): UseModelsReturn {
     setModel,
     catalog,
     providers: catalog?.providers || [],
+    models: catalog?.providers.flatMap((p) => p.models) || [],
     loading,
     error,
     refresh: loadData,

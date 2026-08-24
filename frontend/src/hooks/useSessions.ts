@@ -162,10 +162,10 @@ export default function useSessions(language: "en" | "fa"): UseSessionsReturn {
   const messages = activeSubject ? activeSubject.messages : [];
 
   // --- Create new session ---
-  const createNewSession = useCallback(async () => {
+  const createNewSession = useCallback(async (currentModel?: string) => {
     setSessionsError(null);
     try {
-      const session = await createSession();
+      const session = await createSession(undefined, currentModel);
       const newSub: Subject = {
         id: session.id,
         name: language === "fa" ? "کانال گفتگوی جدید" : "New Neural Pipeline",

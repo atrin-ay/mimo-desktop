@@ -411,13 +411,15 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
                 : s
             )
           );
-
-          // Add the answer as a user message for display
-          handleExecuteCommand(answer);
+          // Note: intentionally NOT calling handleExecuteCommand(answer).
+          // The answer was sent through the dedicated question/response endpoint
+          // (/question/{requestID}/reply). MiMo serve will resume tool execution
+          // automatically via the question_reply event. Adding the answer as a normal
+          // chat message would duplicate it and break the intended flow.
         } catch (err) {
           console.error("Failed to reply to question:", err);
-          // Fallback: send as regular message
-          handleExecuteCommand(answer);
+          // Show the actual error — do NOT silently fall back to sending the answer
+          // as a normal chat message, which would violate the question-response protocol.
         }
       } else {
         // No pending question — send as regular message

@@ -38,6 +38,8 @@ export interface Message {
   reasoning?: string;
   mode?: string;
   isQuestion?: boolean;
+  /** Distinguishes native MiMo permission asks (per_... ids) from question-tool asks. */
+  questionKind?: "question" | "permission";
   questionOptions?: string[];
   questionRequestID?: string;
   questionHeader?: string;

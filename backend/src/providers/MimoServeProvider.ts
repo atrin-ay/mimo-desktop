@@ -38,6 +38,15 @@ export interface MiMoQuestion {
   tool?: { messageID: string; callID: string };
 }
 
+export interface MiMoPermissionRequest {
+  id: string;
+  sessionID: string;
+  permission?: string;
+  patterns?: string[];
+  metadata?: Record<string, unknown>;
+  tool?: { callID?: string };
+}
+
 export interface MiMoEvent {
   type: string;
   timestamp?: number;
@@ -433,28 +442,18 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
 
     logger.info({ type: event.type, sessionID, properties: event.properties }, 'Translating SSE event');
 
-    // Catch any permission, approval, question, prompt, or confirm events
-    if (
-      eventType.includes('question') ||
-      eventType.includes('permission') ||
-      eventType.includes('approval') ||
-      eventType.includes('prompt') ||
-      eventType.includes('confirm') ||
-      eventType.includes('wait')
-    ) {
-      logger.info({ event }, 'Detected permission/question/approval event from mimo serve');
-      const props = event.properties || event;
+    // Native permission requests keep their own event type and their native
+    // per_... id — replies must go to POST /permission/{id}/reply, never
+    // through /question/{id}/reply.
+    if (eventType === 'permission.asked' || eventType === 'permission.ask') {
+      logger.info({ id: event.properties?.id, permission: event.properties?.permission }, 'Native permission request from mimo serve');
+      const props = event.properties || {};
       return {
-        type: 'question.asked',
+        type: 'permission.asked',
         properties: {
-          id: props.id || props.requestID || `q_${Date.now()}`,
+          ...props,
+          id: props.id || props.requestID,
           sessionID: props.sessionID || sessionID,
-          questions: props.questions || [{
-            question: props.message || props.description || `Do you want to allow this action?`,
-            header: props.header || 'Permission Required',
-            options: props.options || [{ label: "Allow", description: "Allow action" }, { label: "Deny", description: "Deny action" }],
-          }],
-          tool: props.tool,
         },
         sessionID,
       };
@@ -485,22 +484,8 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
           case 'tool': {
             const state = part.state;
             logger.info({ tool: part.tool, state, callID: part.callID }, 'Tool part updated state');
-            if (state?.status === 'waiting' || state?.status === 'pending' || state?.status === 'approval' || state?.status === 'permission') {
-              return {
-                type: 'question.asked',
-                properties: {
-                  id: part.callID || `tool_q_${Date.now()}`,
-                  sessionID,
-                  questions: [{
-                    question: `Do you want to allow tool "${part.tool}" to execute?`,
-                    header: `Permission Required: ${part.tool}`,
-                    options: [{ label: "Allow", description: "Allow execution" }, { label: "Deny", description: "Deny execution" }],
-                  }],
-                  tool: { callID: part.callID },
-                },
-                sessionID,
-              };
-            }
+            // Waiting-on-permission states are surfaced by the native
+            // `permission.asked` SSE event — never synthesize prompts here.
             return { type: 'tool_use', part: { tool: part.tool, state: part.state, callID: part.callID }, sessionID };
           }
           case 'step-start':
@@ -698,24 +683,27 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
       const translated = this.translateEvent(event);
       if (translated) onEvent(translated);
 
-      if (event.type === 'question.asked') {
-        const questionID = event.properties?.id || event.id;
-        const questionPromise = new Promise<void>((resolve) => {
-          pendingQuestions.set(questionID, { resolve });
-        });
-        questionPromise.then(() => {});
+      if (event.type === 'question.asked' || event.type === 'permission.asked') {
+        const requestID = event.properties?.id || event.id;
+        if (requestID) {
+          const pendingPromise = new Promise<void>((resolve) => {
+            pendingQuestions.set(requestID, { resolve });
+          });
+          pendingPromise.then(() => {});
+        }
       }
     };
     this.on('event', eventHandler);
 
-    const replyHandler = (data: { requestID: string; answers: string[][] }) => {
+    const resolvePending = (data: { requestID: string }) => {
       const pending = pendingQuestions.get(data.requestID);
       if (pending) {
         pendingQuestions.delete(data.requestID);
         pending.resolve();
       }
     };
-    this.on('question_reply', replyHandler);
+    this.on('question_reply', resolvePending);
+    this.on('permission_reply', resolvePending);
 
     const modelObjStream = model ? (() => {
       const slashIndex = model.indexOf('/');
@@ -743,7 +731,8 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
       await this.waitForCompletion(sessionID, onEvent, pendingQuestions);
     } finally {
       this.removeListener('event', eventHandler);
-      this.removeListener('question_reply', replyHandler);
+      this.removeListener('question_reply', resolvePending);
+      this.removeListener('permission_reply', resolvePending);
       pendingQuestions.clear();
     }
   }
@@ -764,6 +753,7 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
         timeout = setTimeout(() => {
           this.removeListener('event', handler);
           this.removeListener('question_reply', replyHandler);
+          this.removeListener('permission_reply', replyHandler);
           const err = new Error(`MiMo stream timeout (sessionID: ${sessionID}, elapsed: ${Date.now() - startTime}ms, pendingQuestions: ${pendingQuestions.size})`);
           logger.error({ sessionID, elapsed: Date.now() - startTime, pendingCount: pendingQuestions.size }, 'MiMo stream timeout occurred');
           reject(err);
@@ -776,11 +766,12 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
         resetTimeout();
       };
       this.on('question_reply', replyHandler);
+      this.on('permission_reply', replyHandler);
 
       const handler = (event: any) => {
         if (this.eventSessionId(event) !== sessionID) return;
 
-        if (event.type === 'question.asked') {
+        if (event.type === 'question.asked' || event.type === 'permission.asked') {
           resetTimeout();
         }
 
@@ -788,6 +779,7 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
           if (timeout) clearTimeout(timeout);
           this.removeListener('event', handler);
           this.removeListener('question_reply', replyHandler);
+          this.removeListener('permission_reply', replyHandler);
           logger.info({ sessionID, duration: Date.now() - startTime }, 'MiMo stream completed with session.idle');
           resolve();
           return;
@@ -797,6 +789,7 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
           if (timeout) clearTimeout(timeout);
           this.removeListener('event', handler);
           this.removeListener('question_reply', replyHandler);
+          this.removeListener('permission_reply', replyHandler);
           const err = event.properties?.error;
           const message =
             (err && (err.data?.message || err.name || err.type)) || 'MiMo session error';
@@ -898,8 +891,23 @@ export class MimoServeProvider extends EventEmitter implements AIProvider {
     logger.info({ requestID, answers }, 'MimoServeProvider forwarding reply to question endpoint');
     debugLog('reply_question', { requestID, answers });
     const res = await this.httpRequest('POST', `/question/${requestID}/reply`, { answers });
-    logger.info({ requestID, status: res.status, data: res.data }, 'MimoServeProvider received reply response from MiMo serve');
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error(`mimo serve rejected question reply for ${requestID}: status ${res.status} ${JSON.stringify(res.data).slice(0, 200)}`);
+    }
+    logger.info({ requestID, status: res.status }, 'Question reply accepted by mimo serve');
     this.emit('question_reply', { requestID, answers });
+  }
+
+  async replyToPermission(requestID: string, reply: 'once' | 'always' | 'reject', message?: string): Promise<void> {
+    logger.info({ requestID, reply }, 'MimoServeProvider forwarding permission reply to serve');
+    debugLog('reply_permission', { requestID, reply });
+    const body: Record<string, unknown> = message ? { reply, message } : { reply };
+    const res = await this.httpRequest('POST', `/permission/${requestID}/reply`, body);
+    if (res.status < 200 || res.status >= 300) {
+      throw new Error(`mimo serve rejected permission reply for ${requestID}: status ${res.status} ${JSON.stringify(res.data).slice(0, 200)}`);
+    }
+    logger.info({ requestID, status: res.status }, 'Permission resolved by mimo serve');
+    this.emit('permission_reply', { requestID, reply });
   }
 
   async rejectQuestion(requestID: string): Promise<void> {

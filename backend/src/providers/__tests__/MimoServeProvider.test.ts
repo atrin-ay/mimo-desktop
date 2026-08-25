@@ -243,3 +243,114 @@ describe('MimoServeProvider — Session Isolation', () => {
     expect(provider.getSessionForConversation('conv-unknown')).toBeNull();
   });
 });
+
+describe('MimoServeProvider — native permission/question protocol', () => {
+  let provider: MimoServeProvider;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    provider = createTestProvider();
+  });
+
+  afterEach(() => {
+    provider.stop();
+  });
+
+  it('permission.asked keeps its own event type and its native per_... id', () => {
+    const raw = {
+      type: 'permission.asked',
+      properties: {
+        id: 'per_033c2d628001teeOHBZ5oklFTn',
+        sessionID: 'ses_abc',
+        permission: 'external_directory',
+        patterns: ['C:\\Users\\Atrin ay\\Desktop\\*'],
+        metadata: { filepath: 'C:\\Users\\Atrin ay\\Desktop\\hi.txt' },
+      },
+    };
+
+    const translated = (provider as any).translateEvent(raw);
+
+    expect(translated.type).toBe('permission.asked');
+    expect(translated.properties.id).toBe('per_033c2d628001teeOHBZ5oklFTn');
+    expect(translated.properties.permission).toBe('external_directory');
+    expect(translated.properties.patterns).toEqual(['C:\\Users\\Atrin ay\\Desktop\\*']);
+    expect(translated.properties.metadata).toEqual({ filepath: 'C:\\Users\\Atrin ay\\Desktop\\hi.txt' });
+  });
+
+  it('arbitrary event types containing keyword substrings are no longer converted into questions', () => {
+    const raw = {
+      type: 'some.prompt.confirmed.waiting',
+      properties: { message: 'Do you want to allow this action?' },
+    };
+
+    const translated = (provider as any).translateEvent(raw);
+    expect(translated).toBeNull();
+  });
+
+  it('tool parts in waiting state emit tool_use, never a fabricated question', () => {
+    const raw = {
+      type: 'message.part.updated',
+      properties: {
+        part: {
+          type: 'tool',
+          tool: 'write',
+          callID: 'call_xyz',
+          state: { status: 'waiting', input: { filePath: 'x.txt' } },
+        },
+      },
+    };
+
+    const translated = (provider as any).translateEvent(raw);
+
+    expect(translated.type).toBe('tool_use');
+    expect(JSON.stringify(translated)).not.toContain('tool_q_');
+  });
+
+  it('genuine question.asked events pass through unchanged', () => {
+    const raw = {
+      type: 'question.asked',
+      properties: {
+        id: 'whVOvs541Bljg7Da',
+        sessionID: 'ses_abc',
+        questions: [{ question: 'Which?', header: 'Pick', options: [{ label: 'A' }, { label: 'B' }] }],
+      },
+    };
+
+    const translated = (provider as any).translateEvent(raw);
+    expect(translated).toEqual(raw);
+  });
+
+  it('replyToPermission POSTs to /permission/{id}/reply with { reply } and emits permission_reply', async () => {
+    const responseMap = new Map<string, { status: number; data: any }>();
+    responseMap.set('POST /permission/per_123/reply', { status: 200, data: { ok: true } });
+    const httpMock = mockHttpRequest(provider, responseMap);
+
+    const emitted: any[] = [];
+    provider.on('permission_reply', (d: any) => emitted.push(d));
+
+    await provider.replyToPermission('per_123', 'once');
+
+    expect(httpMock).toHaveBeenCalledWith('POST', '/permission/per_123/reply', { reply: 'once' });
+    expect(emitted).toEqual([{ requestID: 'per_123', reply: 'once' }]);
+  });
+
+  it('replyToPermission throws when mimo serve rejects the reply', async () => {
+    const responseMap = new Map<string, { status: number; data: any }>();
+    responseMap.set('POST /permission/per_missing/reply', { status: 404, data: { error: 'Not found' } });
+    mockHttpRequest(provider, responseMap);
+
+    await expect(provider.replyToPermission('per_missing', 'reject')).rejects.toThrow(/status 404/);
+  });
+
+  it('replyToQuestion still POSTs /question/{id}/reply and throws on non-2xx', async () => {
+    const responseMap = new Map<string, { status: number; data: any }>();
+    responseMap.set('POST /question/q_ok/reply', { status: 200, data: { ok: true } });
+    responseMap.set('POST /question/per_wrong_space/reply', { status: 404, data: { error: 'Not found' } });
+    const httpMock = mockHttpRequest(provider, responseMap);
+
+    await provider.replyToQuestion('q_ok', [['Allow']]);
+    expect(httpMock).toHaveBeenCalledWith('POST', '/question/q_ok/reply', { answers: [['Allow']] });
+
+    await expect(provider.replyToQuestion('per_wrong_space', [['Allow']])).rejects.toThrow(/status 404/);
+  });
+});

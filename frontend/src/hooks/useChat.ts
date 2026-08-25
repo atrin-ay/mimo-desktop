@@ -381,7 +381,7 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
     ]
   );
 
-  // --- Handle answer to a question ---
+  // --- Handle answer to a question or permission request ---
   const handleAnswer = useCallback(
     async (answer: string) => {
       // Find the pending question in the current session's messages
@@ -391,10 +391,23 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
       );
 
       if (pendingQuestion?.questionRequestID) {
-        // Send answer via HTTP reply endpoint
         try {
-          const { replyToQuestion } = await import("../api");
-          await replyToQuestion(pendingQuestion.questionRequestID, [[answer]]);
+          if (pendingQuestion.questionKind === "permission") {
+            // Native MiMo permission ask — resolve via /permission/{id}/reply.
+            // NEVER send this through chat; only "once" | "always" | "reject".
+            const key = answer.trim().toLowerCase();
+            const reply: "once" | "always" | "reject" = key.includes("always")
+              ? "always"
+              : key.includes("deny") || key.includes("reject")
+              ? "reject"
+              : "once";
+            const { replyToPermission } = await import("../api");
+            await replyToPermission(pendingQuestion.questionRequestID, reply);
+          } else {
+            // Genuine question-tool ask — resolve via /question/{id}/reply.
+            const { replyToQuestion } = await import("../api");
+            await replyToQuestion(pendingQuestion.questionRequestID, [[answer]]);
+          }
 
           // Mark the question as answered in the UI
           setSubjects((prev) =>
@@ -411,15 +424,10 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
                 : s
             )
           );
-          // Note: intentionally NOT calling handleExecuteCommand(answer).
-          // The answer was sent through the dedicated question/response endpoint
-          // (/question/{requestID}/reply). MiMo serve will resume tool execution
-          // automatically via the question_reply event. Adding the answer as a normal
-          // chat message would duplicate it and break the intended flow.
         } catch (err) {
-          console.error("Failed to reply to question:", err);
-          // Show the actual error — do NOT silently fall back to sending the answer
-          // as a normal chat message, which would violate the question-response protocol.
+          console.error("Failed to deliver question/permission reply:", err);
+          // Do NOT fall back to sending the answer as a normal chat message —
+          // that violates both the question and permission protocols.
         }
       } else {
         // No pending question — send as regular message

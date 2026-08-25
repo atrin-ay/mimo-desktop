@@ -199,6 +199,52 @@ describe("reduceStreamEvent", () => {
     });
   });
 
+  describe("permission.asked", () => {
+    it("creates a permission message preserving the native per_... request ID", () => {
+      const acc = emptyAccumulator();
+      const result = reduceStreamEvent(
+        {
+          type: "permission.asked",
+          timestamp: 1000,
+          properties: {
+            id: "per_033c2d628001teeOHBZ5oklFTn",
+            sessionID: "ses_abc",
+            permission: "external_directory",
+            patterns: ["C:\\Users\\Atrin ay\\Desktop\\*"],
+          },
+        } as any,
+        acc
+      );
+
+      expect(result.questionMessage).not.toBeUndefined();
+      expect(result.questionMessage!.isQuestion).toBe(true);
+      expect(result.questionMessage!.questionKind).toBe("permission");
+      expect(result.questionMessage!.questionRequestID).toBe(
+        "per_033c2d628001teeOHBZ5oklFTn"
+      );
+      expect(result.questionMessage!.questionOptions).toEqual([
+        "Allow",
+        "Always Allow",
+        "Deny",
+      ]);
+      expect(result.questionMessage!.text).toContain("external_directory");
+    });
+
+    it("does not create a permission message without a native id (no fabricated IDs)", () => {
+      const acc = emptyAccumulator();
+      const result = reduceStreamEvent(
+        {
+          type: "permission.asked",
+          timestamp: 1000,
+          properties: { permission: "edit" },
+        } as any,
+        acc
+      );
+
+      expect(result.questionMessage).toBeUndefined();
+    });
+  });
+
   describe("reasoningStream", () => {
     it("accumulates reasoning text separately from agent text", () => {
       const { acc, orbStates } = processSequence(fixtures.reasoningStream.input);

@@ -422,6 +422,9 @@ export interface StreamEvent {
       custom?: boolean;
     }>;
     tool?: { messageID: string; callID: string };
+    permission?: string;
+    patterns?: string[];
+    metadata?: Record<string, unknown>;
   };
   options?: any[];
 }
@@ -501,4 +504,22 @@ export async function listQuestions(): Promise<any[]> {
   }
   const { data } = await res.json();
   return data || [];
+}
+
+// ─── Permission API ──────────────────────────────────────────────────────────
+
+export type PermissionReply = "once" | "always" | "reject";
+
+export async function replyToPermission(
+  requestID: string,
+  reply: PermissionReply
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/permission/${requestID}/reply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reply }),
+  });
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
 }

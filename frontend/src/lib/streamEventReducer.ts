@@ -434,6 +434,41 @@ export function reduceStreamEvent(
       break;
     }
 
+    case "permission.asked": {
+      const props: any = (event as any).properties || {};
+      const requestID = props.id || props.requestID;
+
+      // Never fabricate a request ID — without the native per_... id the
+      // reply cannot resolve anything server-side.
+      if (requestID) {
+        const permName = props.permission || "action";
+        const patterns =
+          Array.isArray(props.patterns) && props.patterns.length > 0
+            ? ` (${props.patterns.join(", ")})`
+            : "";
+
+        result.questionMessage = {
+          id: `question_${Date.now()}`,
+          sender: "system",
+          text: `MiMo needs your approval: ${permName}${patterns}`,
+          timestamp: new Date().toLocaleTimeString("en-US", {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          events: [],
+          artifacts: [],
+          isQuestion: true,
+          questionKind: "permission",
+          questionOptions: ["Allow", "Always Allow", "Deny"],
+          questionRequestID: requestID,
+          questionHeader: `Permission Required: ${permName}`,
+          questionMultiple: false,
+          questionCustom: false,
+        };
+      }
+      break;
+    }
+
     case "question.asked":
     case "question": {
       const questionText = event.part?.text || event.text || event.message || event.properties?.questions?.[0]?.question || "";

@@ -19,6 +19,7 @@ import projectRoutes from './routes/projectRoutes';
 import contextRoutes from './routes/contextRoutes';
 import mimoRoutes from './routes/mimoRoutes';
 import questionRoutes from './routes/questionRoutes';
+import permissionRoutes from './routes/permissionRoutes';
 import modelRoutes from './routes/modelRoutes';
 import providerRoutes from './routes/providerRoutes';
 import { initSchema } from './storage/database';
@@ -42,9 +43,14 @@ app.use('/api/project', projectRoutes);
 app.use('/api/context', contextRoutes);
 app.use('/api/mimo', mimoRoutes);
 app.use('/api/question', questionRoutes);
+app.use('/api/permission', permissionRoutes);
 app.use('/api/models', modelRoutes);
 app.use('/api/providers', providerRoutes);
 app.use('/api/admin', adminRoutes);
+
+app.get('/', (_req, res) => {
+  res.status(200).json({ status: 'ok', service: 'mimo-backend', health: '/health' });
+});
 
 app.get('/health', async (_req, res) => {
   const provider = getProvider() as any;

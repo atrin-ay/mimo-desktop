@@ -67,7 +67,7 @@ describe('useModels', () => {
     });
 
     expect(result.current.providers).toHaveLength(0);
-    expect(result.current.error).toBe('Provider not ready');
+    expect(result.current.error).toBe('MiMo Code is still starting up — retry in a moment');
   });
 
   it('setModel persists to backend and updates local state', async () => {

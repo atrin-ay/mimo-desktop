@@ -17,6 +17,7 @@ router.post('/:requestID/reply', async (req, res) => {
   try {
     const { requestID } = req.params;
     const { answers } = req.body;
+    logger.info({ requestID, answers }, 'Backend received user approval/question reply request');
 
     if (!answers || !Array.isArray(answers)) {
       res.status(400).json({ error: { code: 'invalid_input', message: 'answers array is required' } });
@@ -29,11 +30,12 @@ router.post('/:requestID/reply', async (req, res) => {
       return;
     }
 
+    logger.info({ requestID }, 'Forwarding user approval to AI provider');
     await provider.replyToQuestion(requestID, answers);
-    logger.info({ requestID }, 'Question replied');
+    logger.info({ requestID }, 'Question replied and forwarded successfully');
     res.status(200).json({ data: { success: true } });
   } catch (err: any) {
-    logger.error({ error: err.message }, 'Failed to reply to question');
+    logger.error({ error: err.message, stack: err.stack }, 'Failed to reply to question');
     res.status(500).json({ error: { code: 'internal_error', message: err.message || 'Failed to reply to question' } });
   }
 });

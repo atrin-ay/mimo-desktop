@@ -12,6 +12,7 @@ import {
   sendMessage,
   streamChat,
   ModelInfo,
+  ProviderWithModels,
 } from "../api";
 import useModels from "./useModels";
 import useSessions from "./useSessions";
@@ -39,6 +40,7 @@ export interface UseChatReturn {
   model: string;
   setModel: (model: string) => void;
   models: ModelInfo[];
+  providers: ProviderWithModels[];
   modelsLoading: boolean;
 
   setOrbState: (s: OrbState) => void;
@@ -57,11 +59,11 @@ export interface UseChatReturn {
 
 export default function useChat(language: "en" | "fa"): UseChatReturn {
   // --- Compose extracted hooks ---
-  const { model, setModel, models, modelsLoading, modelsError } = useModels();
+  const { model, setModel, models, providers, modelsLoading, modelsError } = useModels();
   const {
     subjects, activeSubjectId, sessionId, messages,
     setSubjects, setActiveSubjectId, setSessionId, setMessages,
-    createNewSession, deleteSubject, switchSubject, sessionsError,
+    createNewSession: createSessionBase, deleteSubject, switchSubject, sessionsError,
   } = useSessions(language);
 
   // --- Remaining inline state ---
@@ -70,6 +72,13 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
   const [chatError, setChatError] = useState<string | null>(null);
   const [activityLog, setActivityLog] = useState<ActivityEntry[]>([]);
   const [agent, setAgent] = useState<AgentName>('build');
+
+  const createNewSession = useCallback(async () => {
+    setChatError(null);
+    setIsLoading(false);
+    setOrbState(OrbState.Idle);
+    await createSessionBase(model);
+  }, [createSessionBase, model, setOrbState]);
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -84,6 +93,14 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
+
+      // Plan mode resolution: if agent is plan and user requests execution/creation, switch to build mode
+      let currentAgent = agent;
+      if (agent === 'plan' && (/execute|create|write|build|run|implement|proceed|apply/i.test(cmd))) {
+        currentAgent = 'build';
+        setAgent('build');
+        console.log('[MiMo] Plan mode transitioned to build mode for execution command:', cmd);
+      }
 
       setOrbState(OrbState.Thinking);
       setIsLoading(true);
@@ -227,7 +244,7 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
           )
         );
 
-        console.log(`[MiMo] Sending message in ${agent} mode`);
+        console.log(`[MiMo] Sending message in ${currentAgent} mode`);
 
         // Initialize the stream accumulator (used by reducer and finalize)
         let acc: StreamAccumulator = {
@@ -240,7 +257,7 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
 
         try {
 
-          for await (const event of streamChat(currentSessionId, cmd, agent, abortRef.current?.signal, model)) {
+          for await (const event of streamChat(currentSessionId, cmd, currentAgent, abortRef.current?.signal, model)) {
             // Run the pure reducer
             const result = reduceStreamEvent(event, acc);
             acc = result.accumulator;
@@ -294,33 +311,24 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
               );
             }
           }
-        } catch (streamErr) {
+        } catch (streamErr: any) {
           // If aborted by user, don't fall back to non-streaming
           if (controller.signal.aborted) {
             console.log("Streaming aborted by user");
           } else {
-            // Fallback to non-streaming
-            console.log("Streaming failed, falling back:", streamErr);
-            try {
-              const response = await sendMessage(
-                currentSessionId,
-                cmd,
-                agent,
-                model
-              );
-              agentText = response.message.content;
-            } catch {
-              agentText = "";
-            }
+            console.log("Streaming failed:", streamErr);
+            const errDetail = streamErr?.message || "Stream failed";
+            agentText = acc.agentText ? `${acc.agentText}\n\n⚠️ **Error:** ${errDetail}` : `⚠️ **Error:** ${errDetail}`;
           }
         }
 
         // Finalize message — use acc values (streaming) or agentText (non-streaming fallback)
         const finalText = agentText || acc.agentText;
         if (finalText) {
+          const isError = finalText.includes("⚠️ **Error:**");
           updateMessage({
             text: finalText,
-            status: "done",
+            status: isError ? "error" : "done",
             events: acc.perMessageEvents,
             artifacts: acc.perMessageArtifacts,
             reasoning: acc.reasoningText || undefined,
@@ -403,13 +411,15 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
                 : s
             )
           );
-
-          // Add the answer as a user message for display
-          handleExecuteCommand(answer);
+          // Note: intentionally NOT calling handleExecuteCommand(answer).
+          // The answer was sent through the dedicated question/response endpoint
+          // (/question/{requestID}/reply). MiMo serve will resume tool execution
+          // automatically via the question_reply event. Adding the answer as a normal
+          // chat message would duplicate it and break the intended flow.
         } catch (err) {
           console.error("Failed to reply to question:", err);
-          // Fallback: send as regular message
-          handleExecuteCommand(answer);
+          // Show the actual error — do NOT silently fall back to sending the answer
+          // as a normal chat message, which would violate the question-response protocol.
         }
       } else {
         // No pending question — send as regular message
@@ -437,6 +447,7 @@ export default function useChat(language: "en" | "fa"): UseChatReturn {
     agent,
     model,
     models,
+    providers,
     modelsLoading,
     setOrbState,
     setAgent,

@@ -30,11 +30,24 @@ vi.mock('../../storage/database', () => ({
   })),
 }));
 
-vi.mock('../../context/ContextManager', () => ({
-  contextManager: {
+vi.mock('../../services/projectService', () => ({
+  projectService: {
     ensureProjectForSession: vi.fn(() => 'proj_1'),
-    buildInjection: vi.fn(() => null),
-    afterExchange: vi.fn(),
+  },
+}));
+
+vi.mock('../../services/modelService', () => ({
+  modelService: {
+    resolveModelForSession: vi.fn(async () => 'xiaomi/mimo-v2.5'),
+  },
+}));
+
+vi.mock('../../services/chatService', () => ({
+  chatService: {
+    sendMessage: vi.fn(async (sessionId, message, agent, model) => {
+      const res = await mockProvider.sendMessage(sessionId, [{ role: 'user', content: message }], agent, model);
+      return { sessionId, message: { id: '1', sessionId, role: 'assistant', content: res.content, createdAt: '' } };
+    }),
   },
 }));
 
@@ -116,6 +129,8 @@ describe('chatController — Validation rejection', () => {
     const next = makeNext();
 
     await streamMessage(req, res, next);
+
+    expect(mockProvider.sendMessageStream).toHaveBeenCalled();
 
     // Headers were flushed (SSE setup), so error should be a fatal_error SSE event
     const fatalEvent = res._written.find((w: string) => w.includes('fatal_error'));

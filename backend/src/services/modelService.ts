@@ -2,6 +2,9 @@ import { getProvider } from '../providers';
 import { logger } from '../config/logger';
 import { MimoLocalClient, type MimoProvidersResponse } from '../mimo/client';
 import getDatabase from '../storage/database';
+import { sessionRepository } from '../storage/sessionRepository';
+import { getRuntimePaths } from '../mimo/runtime';
+import fs from 'fs';
 
 export interface ProviderWithModels {
   id: string;
@@ -10,6 +13,7 @@ export interface ProviderWithModels {
   options: Record<string, unknown>;
   source: string;
   hasCredential: boolean;
+  authMethod?: 'api_key' | 'oauth' | 'unknown';
   models: ModelInfo[];
 }
 
@@ -115,6 +119,16 @@ export const modelService = {
         return a.name.localeCompare(b.name);
       });
 
+      const rawAuthMethods = (provData as any).authMethods as string[] | undefined;
+      let authMethod: 'api_key' | 'oauth' | 'unknown' = 'unknown';
+      if (rawAuthMethods && Array.isArray(rawAuthMethods)) {
+        if (rawAuthMethods.includes('oauth')) {
+          authMethod = 'oauth';
+        } else if (rawAuthMethods.length > 0) {
+          authMethod = 'api_key';
+        }
+      }
+
       providers.push({
         id: provId,
         name: provData.name || provId,
@@ -122,8 +136,49 @@ export const modelService = {
         options: provData.options || {},
         source: provData.source,
         hasCredential,
+        authMethod,
         models: modelsList,
       });
+    }
+
+    const seenProviderIds = new Set(providers.map(p => p.id));
+    const defaultKnownProviders = [
+      { id: 'google', name: 'Google', defaultModels: [{ id: 'google/gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite' }, { id: 'google/gemini-1.5-pro', name: 'Gemini 1.5 Pro' }] },
+      { id: 'openai', name: 'OpenAI', defaultModels: [{ id: 'openai/gpt-4o', name: 'GPT-4o' }] },
+      { id: 'opencode', name: 'OpenCode Zen', defaultModels: [{ id: 'opencode/claude-opus-4-7', name: 'Claude Opus 4.7' }] },
+      { id: 'anthropic', name: 'Anthropic', defaultModels: [{ id: 'anthropic/claude-3-7-sonnet', name: 'Claude 3.7 Sonnet' }] },
+      { id: 'xiaomi', name: 'Xiaomi', defaultModels: [{ id: 'xiaomi/mimo-v2.5', name: 'MiMo v2.5' }] },
+      { id: 'mimo', name: 'MiMo Auto (free)', defaultModels: [{ id: 'mimo/mimo-auto', name: 'Auto' }] },
+    ];
+
+    for (const kp of defaultKnownProviders) {
+      if (!seenProviderIds.has(kp.id)) {
+        let hasCredential = false;
+        try {
+          const paths = getRuntimePaths();
+          if (fs.existsSync(paths.authFile)) {
+            const authObj = JSON.parse(fs.readFileSync(paths.authFile, 'utf-8'));
+            if (authObj[kp.id]) hasCredential = true;
+          }
+        } catch {}
+
+        providers.push({
+          id: kp.id,
+          name: kp.name,
+          env: [],
+          options: {},
+          source: hasCredential ? 'api' : 'none',
+          hasCredential,
+          authMethod: 'api_key',
+          models: kp.defaultModels.map(m => ({
+            id: m.id,
+            providerID: kp.id,
+            modelID: m.id.split('/')[1],
+            name: m.name,
+            status: 'active',
+          })),
+        });
+      }
     }
 
     // Sort providers by name
@@ -144,9 +199,7 @@ export const modelService = {
     const db = getDatabase();
     const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get('selected_model') as { value: string } | undefined;
     if (row && row.value) {
-      if (await this.isKnownModel(row.value)) {
-        return row.value;
-      }
+      return row.value;
     }
 
     // Fallback to catalog default
@@ -157,14 +210,14 @@ export const modelService = {
       const firstProv = Object.keys(defaults)[0];
       if (firstProv && defaults[firstProv]) {
         const defModel = `${firstProv}/${defaults[firstProv]}`;
-        await this.setCurrentModel(defModel);
+        await this.setCurrentModel(defModel).catch(() => {});
         return defModel;
       }
 
       for (const p of catalog.providers) {
         if (p.models.length > 0) {
           const fallback = p.models[0].id;
-          await this.setCurrentModel(fallback);
+          await this.setCurrentModel(fallback).catch(() => {});
           return fallback;
         }
       }
@@ -216,6 +269,36 @@ export const modelService = {
     }
 
     return { providerID, modelID };
+  },
+
+  async resolveModelForSession(sessionId?: string, requestedModel?: string): Promise<string> {
+    if (sessionId && requestedModel) {
+      try {
+        if (await this.isKnownModel(requestedModel)) {
+          sessionRepository.updateModel(sessionId, requestedModel);
+          return requestedModel;
+        }
+      } catch {}
+    }
+    if (sessionId) {
+      const session = sessionRepository.findById(sessionId);
+      if (session?.model) {
+        if (await this.isKnownModel(session.model)) {
+          return session.model;
+        }
+      }
+    }
+    if (requestedModel) {
+      try {
+        if (await this.isKnownModel(requestedModel)) {
+          if (sessionId) {
+            sessionRepository.updateModel(sessionId, requestedModel);
+          }
+          return requestedModel;
+        }
+      } catch {}
+    }
+    return this.getCurrentModel();
   },
 };
 

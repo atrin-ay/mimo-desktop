@@ -24,6 +24,7 @@ export interface EnvConfig {
   logLevel: string;
   databasePath: string;
   aiProvider: string;
+  aiProviderFallbackApplied: boolean;
   mimoApiKey: string;
   mimoBaseUrl: string;
   mimoModel: string;
@@ -51,12 +52,14 @@ function loadEnv(): EnvConfig {
   const databasePath = process.env.DATABASE_PATH ?? './data/mimo.db';
   let aiProvider = process.env.AI_PROVIDER ?? 'mimo-serve';
   const mimoApiKey = process.env.MIMO_API_KEY ?? '';
+  let aiProviderFallbackApplied = false;
 
   // Safety: if AI_PROVIDER is explicitly 'mimo' but no API key is configured,
   // fall back to mimo-serve rather than starting in a guaranteed-broken state.
   if (aiProvider === 'mimo' && !mimoApiKey) {
     console.warn('WARNING: AI_PROVIDER is set to "mimo" but no MIMO_API_KEY is configured — falling back to mimo-serve');
     aiProvider = 'mimo-serve';
+    aiProviderFallbackApplied = true;
   }
   const mimoBaseUrl = process.env.MIMO_BASE_URL ?? 'https://api.siliconflow.cn/v1';
   const mimoModel = process.env.MIMO_MODEL ?? 'Qwen/Qwen3-8B';
@@ -81,6 +84,7 @@ function loadEnv(): EnvConfig {
     logLevel,
     databasePath,
     aiProvider,
+    aiProviderFallbackApplied,
     mimoApiKey,
     mimoBaseUrl,
     mimoModel,

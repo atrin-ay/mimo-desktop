@@ -141,12 +141,11 @@ const settingsTranslations = {
 export default function SettingsSection({ language, theme = "dark", setTheme }: SettingsSectionProps) {
   const [activeTab, setActiveTab] = useState<"general" | "ai" | "skills" | "notifications" | "privacy" | "connected">("general");
   const [accentColor, setAccentColor] = useState("#5DF7FF");
-  const [reasoningMode, setReasoningMode] = useState(true);
-  const [responseStyle, setResponseStyle] = useState("concise");
 
   const { providers, loading: provLoading, error: provError, addCredential, removeCredential, refreshing, refreshCatalog } = useProviders();
   const [selectedProviderId, setSelectedProviderId] = useState<string>('');
   const [credentialKey, setCredentialKey] = useState<string>('');
+  const [providerSearch, setProviderSearch] = useState<string>('');
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
 
@@ -316,36 +315,6 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
                 </div>
 
                 <div className="space-y-4 pt-2">
-                  <div className="flex justify-between items-center py-2.5 border-b border-white/5">
-                    <div className="max-w-[70%]">
-                      <span className="text-xs font-semibold text-white/80 block">Continuous Reasoning Mode</span>
-                      <span className="text-[10px] text-titanium/45">Allows the model to think extensively before emitting results.</span>
-                    </div>
-                    <button
-                      onClick={() => setReasoningMode(!reasoningMode)}
-                      className={`w-11 h-6 rounded-full p-0.5 transition-all cursor-pointer ${
-                        reasoningMode ? "bg-neural-cyan" : "bg-white/10"
-                      }`}
-                    >
-                      <div className={`w-5 h-5 bg-black rounded-full transition-all ${
-                        reasoningMode ? (isRtl ? "-translate-x-0" : "translate-x-5") : (isRtl ? "-translate-x-5" : "translate-x-0")
-                      }`} />
-                    </button>
-                  </div>
-
-                  <div className="flex justify-between items-center py-2.5 border-b border-white/5">
-                    <span className="text-xs font-semibold text-white/80">Response Synthesis Style</span>
-                    <select 
-                      value={responseStyle}
-                      onChange={(e) => setResponseStyle(e.target.value)}
-                      className="bg-[#111] border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-neural-cyan/30 cursor-pointer"
-                    >
-                      <option value="concise">Concise & Direct (Speed)</option>
-                      <option value="verbose">Comprehensive & Structured</option>
-                      <option value="code-first">Technical & Code-centric</option>
-                    </select>
-                  </div>
-
                   {/* Providers Management Section */}
                   <div className="space-y-4 py-3">
                     <div className="flex justify-between items-center">
@@ -363,11 +332,23 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
                       </button>
                     </div>
 
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="Search providers..."
+                        value={providerSearch}
+                        onChange={(e) => setProviderSearch(e.target.value)}
+                        className="bg-[#111] border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-neural-cyan/30 w-full font-mono"
+                      />
+                    </div>
+
                     {provLoading ? (
                       <div className="text-xs text-titanium/50 py-4 text-center font-mono">Loading providers...</div>
                     ) : (
                       <div className="space-y-2">
-                        {providers.map((p) => (
+                        {providers
+                          .filter((p) => p.name.toLowerCase().includes(providerSearch.toLowerCase()) || p.id.toLowerCase().includes(providerSearch.toLowerCase()))
+                          .map((p) => (
                           <div key={p.id} className="p-3 bg-white/[0.01] border border-white/5 rounded-xl flex items-center justify-between gap-3">
                             <div className="space-y-0.5">
                               <div className="flex items-center gap-2">
@@ -384,39 +365,47 @@ export default function SettingsSection({ language, theme = "dark", setTheme }: 
                             </div>
 
                             <div className="flex items-center gap-2">
-                              {selectedProviderId === p.id ? (
-                                <div className="flex items-center gap-1.5">
+                              {p.authMethod === 'oauth' ? (
+                                <span className="text-[10px] font-mono text-titanium/50 bg-white/5 px-2.5 py-1 rounded" title="OAuth required — API key setup not applicable">
+                                  OAuth Required
+                                </span>
+                              ) : selectedProviderId === p.id ? (
+                                <div className="flex flex-col gap-2 p-3 bg-black/40 border border-white/10 rounded-xl my-1 w-full">
+                                  <div className="text-xs font-bold text-white font-sans">Provider: {p.name}</div>
+                                  <div className="text-[10px] text-titanium/60 font-mono">API Key:</div>
                                   <input
                                     type="password"
                                     autoComplete="off"
-                                    placeholder="API Key..."
+                                    placeholder="Enter API Key..."
                                     value={credentialKey}
                                     onChange={(e) => setCredentialKey(e.target.value)}
-                                    className="bg-[#111] border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:border-neural-cyan/30 w-36"
+                                    className="bg-[#111] border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-neural-cyan/30 w-full font-mono"
                                   />
-                                  <button
-                                    onClick={async () => {
-                                      setActionError(null);
-                                      setActionSuccess(null);
-                                      try {
-                                        await addCredential(p.id, credentialKey);
-                                        setCredentialKey('');
-                                        setSelectedProviderId('');
-                                        setActionSuccess(`Credential saved for ${p.name}`);
-                                      } catch (err: any) {
-                                        setActionError(err?.message || 'Failed to save');
-                                      }
-                                    }}
-                                    className="px-2.5 py-1 bg-neural-cyan text-black rounded-lg text-[10px] font-mono font-bold cursor-pointer"
-                                  >
-                                    Save
-                                  </button>
-                                  <button
-                                    onClick={() => { setSelectedProviderId(''); setCredentialKey(''); }}
-                                    className="px-2 py-1 bg-white/5 text-titanium/60 rounded-lg text-[10px] font-mono cursor-pointer hover:text-white"
-                                  >
-                                    Cancel
-                                  </button>
+                                  <div className="flex items-center gap-2 justify-end mt-1">
+                                    <button
+                                      onClick={async () => {
+                                        setActionError(null);
+                                        setActionSuccess(null);
+                                        try {
+                                          await addCredential(p.id, credentialKey);
+                                          setCredentialKey('');
+                                          setSelectedProviderId('');
+                                          setActionSuccess(`Connected ${p.name} successfully`);
+                                        } catch (err: any) {
+                                          setActionError(err?.message || 'Failed to connect');
+                                        }
+                                      }}
+                                      className="px-3 py-1 bg-neural-cyan text-black rounded-lg text-[11px] font-mono font-bold cursor-pointer hover:bg-white transition-all"
+                                    >
+                                      Connect
+                                    </button>
+                                    <button
+                                      onClick={() => { setSelectedProviderId(''); setCredentialKey(''); }}
+                                      className="px-3 py-1 bg-white/5 text-titanium/60 rounded-lg text-[11px] font-mono cursor-pointer hover:text-white transition-all"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
                                 </div>
                               ) : (
                                 <div className="flex items-center gap-1.5">

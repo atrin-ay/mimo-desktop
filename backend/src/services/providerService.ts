@@ -14,6 +14,7 @@ export interface ProviderSummary {
   hasCredential: boolean;
   source: string;
   modelCount: number;
+  authMethod?: 'api_key' | 'oauth' | 'unknown';
 }
 
 export function keyHash(key: string): string {
@@ -29,6 +30,7 @@ export const providerService = {
       hasCredential: p.hasCredential,
       source: p.source,
       modelCount: p.models.length,
+      authMethod: p.authMethod || 'unknown',
     }));
   },
 
@@ -36,7 +38,11 @@ export const providerService = {
     if (!PROVIDER_ID_REGEX.test(providerId)) {
       throw new Error(`Invalid provider ID format: "${providerId}"`);
     }
-    if (!key || typeof key !== 'string' || key.length < 8 || key.length > 2048) {
+    if (!key || typeof key !== 'string') {
+      throw new Error('API key must be a valid string');
+    }
+    key = key.trim();
+    if (key.length < 8 || key.length > 2048) {
       throw new Error('API key must be between 8 and 2048 characters');
     }
     if (/[\x00-\x1f\x7f]/.test(key)) {
@@ -74,6 +80,15 @@ export const providerService = {
       logger.warn({ error: err.message }, 'Failed to warm models catalog after credential update (non-fatal)');
     }
 
+    // Restart provider to reload fresh auth into mimo serve
+    try {
+      if (typeof provider.restart === 'function') {
+        await provider.restart();
+      }
+    } catch (err: any) {
+      logger.warn({ error: err.message }, 'Failed to restart provider after credential update');
+    }
+
     modelService.invalidate();
   },
 
@@ -91,6 +106,16 @@ export const providerService = {
     await client.deleteAuth(providerId);
 
     logger.info({ providerId }, 'Provider credential removed');
+
+    // Restart provider to reload fresh auth into mimo serve
+    try {
+      if (typeof provider.restart === 'function') {
+        await provider.restart();
+      }
+    } catch (err: any) {
+      logger.warn({ error: err.message }, 'Failed to restart provider after credential removal');
+    }
+
     modelService.invalidate();
   },
 

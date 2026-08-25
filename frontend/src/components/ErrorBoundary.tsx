@@ -7,6 +7,7 @@ interface ErrorBoundaryProps {
 
 interface ErrorBoundaryState {
   hasError: boolean;
+  error?: Error;
 }
 
 export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
@@ -15,8 +16,8 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
     this.state = { hasError: false };
   }
 
-  static getDerivedStateFromError(): ErrorBoundaryState {
-    return { hasError: true };
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
@@ -25,7 +26,12 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
 
   render() {
     if (this.state.hasError) {
-      return this.props.fallback;
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-sm text-red-400 font-mono p-8 gap-2 bg-obsidian">
+          <span>Chat encountered an error: {this.state.error?.message || 'Unknown render error'}</span>
+          <span className="text-xs text-titanium/50">Check browser console for detailed stack trace.</span>
+        </div>
+      );
     }
     return this.props.children;
   }

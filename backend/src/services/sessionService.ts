@@ -1,5 +1,6 @@
 import { sessionRepository } from '../storage/sessionRepository';
 import { messageRepository } from '../storage/messageRepository';
+import { modelService } from './modelService';
 import { ConflictError, NotFoundError } from '../middleware/errors';
 import { logger } from '../config/logger';
 import { getRequestContext } from '../middleware/requestContext';
@@ -16,7 +17,7 @@ export const sessionService = {
   },
 
   /** Create a new session. */
-  createSession(id?: string): Session {
+  async createSession(id?: string, model?: string): Promise<Session> {
     if (id) {
       const existing = sessionRepository.findById(id);
       if (existing) {
@@ -24,14 +25,16 @@ export const sessionService = {
       }
     }
 
-    const session = sessionRepository.create(id);
+    const targetModel = model || (await modelService.getCurrentModel().catch(() => 'xiaomi/mimo-v2.5')) || 'xiaomi/mimo-v2.5';
+    const session = sessionRepository.create(id, targetModel ?? undefined);
     const requestContext = getRequestContext();
     logger.info(
       {
         sessionId: session.id,
         requestId: requestContext?.requestId,
+        model: targetModel,
       },
-      'Session created',
+      'Session created with model',
     );
     return session;
   },

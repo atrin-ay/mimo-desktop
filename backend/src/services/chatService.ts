@@ -3,6 +3,7 @@ import { messageRepository } from '../storage/messageRepository';
 import { getDatabase } from '../storage/database';
 import { getProvider } from '../providers';
 import { contextManager } from '../context/ContextManager';
+import { modelService } from './modelService';
 import { NotFoundError, HttpError } from '../middleware/errors';
 import { logger } from '../config/logger';
 import type { ChatResponse, Message, MiMoAgent, ProviderMessage } from '../types';
@@ -48,11 +49,14 @@ export const chatService = {
       ...trimmedHistory,
     ];
 
+    // 5.5. Resolve chat-scoped model
+    const targetModel = await modelService.resolveModelForSession(sessionId, model);
+
     // 6. Ask the provider for a reply.
     const provider = getProvider();
     let result;
     try {
-      result = await provider.sendMessage(sessionId, requestHistory, agent, model);
+      result = await provider.sendMessage(sessionId, requestHistory, agent, targetModel);
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       logger.error(

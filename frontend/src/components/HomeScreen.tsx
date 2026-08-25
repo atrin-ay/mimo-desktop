@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { OrbState, ActiveView, Goal, AgentName } from "../types";
 import { translations } from "../utils/translations";
+import { ModelInfo, ProviderWithModels } from "../api";
 import Orb from "./Orb";
 import ErrorBoundary from "./ErrorBoundary";
 
@@ -24,6 +25,11 @@ interface HomeScreenProps {
   setLanguage: (lang: "en" | "fa") => void;
   agent: AgentName;
   setAgent: (agent: AgentName) => void;
+  model: string;
+  setModel: (model: string) => void;
+  models: ModelInfo[];
+  providers: ProviderWithModels[];
+  modelsLoading: boolean;
 }
 
 export default function HomeScreen({
@@ -36,11 +42,34 @@ export default function HomeScreen({
   setLanguage,
   agent,
   setAgent,
+  model,
+  setModel,
+  models,
+  providers,
+  modelsLoading,
 }: HomeScreenProps) {
   const [prompt, setPrompt] = useState("");
   const [isListening, setIsListening] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const t = translations[language];
+
+  const currentProviderId = model.includes('/') ? model.split('/')[0] : (providers[0]?.id || '');
+  const [selectedProviderId, setSelectedProviderId] = useState<string>(currentProviderId);
+
+  useEffect(() => {
+    if (model.includes('/')) {
+      const pId = model.split('/')[0];
+      if (pId && pId !== selectedProviderId) {
+        setSelectedProviderId(pId);
+      }
+    } else if (providers.length > 0 && !selectedProviderId) {
+      setSelectedProviderId(providers[0].id);
+      const provModels = models.filter(m => m.providerID === providers[0].id);
+      if (provModels.length > 0 && !model) {
+        setModel(provModels[0].id);
+      }
+    }
+  }, [model, providers]);
 
   const handleSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -207,6 +236,47 @@ export default function HomeScreen({
 
       {/* Input area */}
       <div className="w-full max-w-3xl mx-auto z-30 mt-4 mb-6">
+        {/* Provider & Model Selectors */}
+        <div className="flex items-center gap-2 mb-2 px-1">
+          <select
+            value={selectedProviderId}
+            onChange={(e) => {
+              const provId = e.target.value;
+              setSelectedProviderId(provId);
+              const provModels = models.filter(m => m.providerID === provId);
+              if (provModels.length > 0) {
+                setModel(provModels[0].id);
+              }
+            }}
+            className="bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-neural-cyan/30 cursor-pointer"
+          >
+            {providers.map((p) => (
+              <option key={p.id} value={p.id} className="bg-[#111] text-white">
+                {p.name} ({p.modelCount || p.models.length})
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            disabled={modelsLoading}
+            className="bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-neural-cyan/30 cursor-pointer disabled:opacity-50 flex-1"
+          >
+            {modelsLoading ? (
+              <option className="bg-[#111] text-white">Loading models...</option>
+            ) : (
+              models
+                .filter(m => !selectedProviderId || m.providerID === selectedProviderId)
+                .map((m) => (
+                  <option key={m.id} value={m.id} className="bg-[#111] text-white">
+                    {m.name}
+                  </option>
+                ))
+            )}
+          </select>
+        </div>
+
         <div className="flex items-center gap-1.5 mb-2.5 px-1 overflow-x-auto scrollbar-none">
           {[
             {
